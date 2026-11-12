@@ -334,16 +334,72 @@ Prompt: *"Generate a movie idea in one sentence."*
 
 ## 8. Streaming
 
-Returns tokens as they are generated instead of waiting for the full answer:
+Users expect the answer to start appearing right away, not after 10–30 seconds of waiting.
+`converse_stream` sends the text **in chunks as soon as they are generated**, so the experience goes
+from *"submit and wait"* to *"submit and watch the answer appear"*.
+
+### How it works
+
+`converse_stream` returns immediately with a response containing a `stream`: a **generator** that
+yields events while the model writes. Each event carries a small piece of the answer.
 
 ```python
-stream = client.converse_stream(modelId=model_id, messages=messages)
-for event in stream["stream"]:
-    if "contentBlockDelta" in event:
-        print(event["contentBlockDelta"]["delta"]["text"], end="")
+messages = []
+add_user_message(messages, "Write a 1 sentence description of a fake database")
+response = client.converse_stream(messages=messages, modelId=model_id)
+
+for event in response["stream"]:
+    print(event)          # see every event as it arrives
 ```
 
-It improves **time-to-first-token** (perceived latency), not total time or cost.
+### Stream events
+
+Always in the same order:
+
+| Event | When | Useful content |
+|---|---|---|
+| `messageStart` | Start of the answer | `role` (`assistant`) |
+| `contentBlockDelta` | Many times | `delta.text` → the next piece of text |
+| `contentBlockStop` | End of a content block | — |
+| `messageStop` | End of the answer | `stopReason` (`end_turn`, `max_tokens`…) |
+| `metadata` | Last event | `usage` (input/output tokens), `metrics.latencyMs` |
+
+```mermaid
+flowchart LR
+    A[messageStart] --> B[contentBlockDelta ×N] --> C[contentBlockStop] --> D[messageStop] --> E[metadata]
+```
+
+For plain text generation, **only `contentBlockDelta` matters**: it holds the text to show.
+
+### Extracting the text
+
+```python
+text = ""
+for event in response["stream"]:
+    if "contentBlockDelta" in event:
+        chunk = event["contentBlockDelta"]["delta"]["text"]
+        print(chunk, end="")    # end="" → no newline after each chunk
+        text += chunk
+
+print("\n\nTotal Message:\n" + text)
+```
+
+### In a real app
+
+Instead of printing each chunk you would:
+
+- Send each chunk to the frontend via **WebSockets** or **Server-Sent Events**.
+- Update the UI so the answer grows in real time.
+- **Store the full message** when the stream ends (and append it to the history if the conversation continues).
+- Handle errors that can happen mid-stream.
+
+### Things to remember
+
+- Streaming improves **time-to-first-token** (perceived latency), not total time or cost: same tokens, same price.
+- `stopReason` and token usage only arrive at the end, in `messageStop` and `metadata`.
+- `InvokeModel` equivalent: `invoke_model_with_response_stream`.
+
+📓 [003_Streaming_complete.ipynb](exercises/003_Streaming_complete.ipynb)
 
 ## 9. Controlling model output
 
