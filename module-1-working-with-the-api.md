@@ -128,7 +128,7 @@ Both have the same shape (`role` + `content` list). The message Bedrock returns 
 assistant message in that format, so you can append it to the list and keep chaining requests →
 see [Multi-turn conversations](#3-multi-turn-conversations).
 
-📓 [001_Api_Requests_complete.ipynb](exercises/001_Api_Requests_complete.ipynb)
+📓 [001_Api_Requests_complete.ipynb](exercises/module_1/001_Api_Requests_complete.ipynb)
 
 ## 3. Multi-turn conversations
 
@@ -186,11 +186,11 @@ messages in a row are not allowed by the API.
 > Managing the list by hand feels tedious at first, but it's the basis of any app that keeps
 > conversational context with Claude.
 
-📓 [001_Api_Requests_complete.ipynb](exercises/001_Api_Requests_complete.ipynb)
+📓 [001_Api_Requests_complete.ipynb](exercises/module_1/001_Api_Requests_complete.ipynb)
 
 ## 4. Chat bot exercise
 
-📓 [001_Api_Requests_complete.ipynb](exercises/001_Api_Requests_complete.ipynb)
+📓 [001_Api_Requests_complete.ipynb](exercises/module_1/001_Api_Requests_complete.ipynb)
 
 A `while True` loop that reads user input, adds it to the history, calls `chat()` and appends
 the reply as an assistant message. Because the full list is sent every time, the chatbot keeps the
@@ -262,11 +262,11 @@ def chat(messages, system=None):
 - It is processed **before** any user message.
 - Set it per conversation; keep it the same during one conversation.
 
-📓 [002_System_Messages_complete.ipynb](exercises/002_System_Messages_complete.ipynb)
+📓 [002_System_Messages_complete.ipynb](exercises/module_1/002_System_Messages_complete.ipynb)
 
 ## 6. System prompt exercise
 
-📓 [002_System_Messages_complete.ipynb](exercises/002_System_Messages_complete.ipynb)
+📓 [002_System_Messages_complete.ipynb](exercises/module_1/002_System_Messages_complete.ipynb)
 
 Asks for a function that checks a string for duplicate characters, with the system prompt
 *"You are a Python engineer who writes very concise code."* The system prompt changes the style of
@@ -332,7 +332,7 @@ Prompt: *"Generate a movie idea in one sentence."*
 
 > Since the default is 1.0, lower it for tasks that need precision and consistency.
 
-📓 [002_System_Messages_complete.ipynb](exercises/002_System_Messages_complete.ipynb)
+📓 [002_System_Messages_complete.ipynb](exercises/module_1/002_System_Messages_complete.ipynb)
 
 ## 8. Streaming
 
@@ -401,7 +401,7 @@ Instead of printing each chunk you would:
 - `stopReason` and token usage only arrive at the end, in `messageStop` and `metadata`.
 - `InvokeModel` equivalent: `invoke_model_with_response_stream`.
 
-📓 [003_Streaming_complete.ipynb](exercises/003_Streaming_complete.ipynb)
+📓 [003_Streaming_complete.ipynb](exercises/module_1/003_Streaming_complete.ipynb)
 
 ## 9. Controlling model output
 
@@ -473,7 +473,7 @@ Useful for:
 > Combined, these two techniques shape answers in ways prompting alone can't — see
 > [Structured data](#10-structured-data).
 
-📓 [004_Controlling_Output_complete.ipynb](exercises/004_Controlling_Output_complete.ipynb)
+📓 [004_Controlling_Output_complete.ipynb](exercises/module_1/004_Controlling_Output_complete.ipynb)
 
 ## 10. Structured data
 
