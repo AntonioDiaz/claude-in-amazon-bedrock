@@ -159,6 +159,8 @@ def chat(messages):
 
 ### Building the conversation
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/b1ca983a-ac93-4ba1-a7cb-66b3ac2c83fc" />
+
 ```python
 messages = []
 
@@ -403,15 +405,75 @@ Instead of printing each chunk you would:
 
 ## 9. Controlling model output
 
-Two techniques to steer what Claude writes:
+Besides writing better prompts, two techniques give precise control over **how Claude starts** and
+**where it stops**: prefilled assistant messages and stop sequences.
 
-- **Prefill:** write the beginning of the assistant turn yourself; Claude continues from there.
-- **Stop sequences:** generation stops when Claude emits a given string (`stopReason = stop_sequence`).
+### Prefilled assistant messages
+
+Add an **assistant message at the end** of the list with the beginning of the answer you want.
+Claude sees that it has "already started" answering and **continues from exactly that point**,
+without repeating your text.
 
 ```python
-messages.append({"role": "assistant", "content": [{"text": "Sure, here's"}]})   # prefill
-client.converse(..., inferenceConfig={"stopSequences": ["\n\n"]})
+messages = []
+add_user_message(messages, "Is coffee or tea better for breakfast?")
+add_assistant_message(messages, "Coffee is better because")
+
+chat(messages)   # → "it has more caffeine."
 ```
+
+The result is only the continuation, so **join both parts** to get the full answer:
+*"Coffee is better because it has more caffeine."*
+
+Change the prefill to steer the answer anywhere:
+
+| Prefill | Effect |
+|---|---|
+| `"Coffee is better because"` | Argues for coffee |
+| `"Tea is better because"` | Argues for tea |
+| `"They are the same because"` | Neutral answer |
+
+### Stop sequences
+
+A list of strings: as soon as Claude generates **any** of them, it stops and returns what it has so
+far. The stop sequence itself is **not included** in the response (`stopReason = stop_sequence`).
+
+Add them to `inferenceConfig`:
+
+```python
+def chat(messages, system=None, temperature=1.0, stop_sequences=[]):
+    params = {
+        "modelId": model_id,
+        "messages": messages,
+        "inferenceConfig": {
+            "temperature": temperature,
+            "stopSequences": stop_sequences,
+        },
+    }
+    if system:
+        params["system"] = [{"text": system}]
+    response = client.converse(**params)
+    return response["output"]["message"]["content"][0]["text"]
+```
+
+```python
+messages = []
+add_user_message(messages, "Count from 1 to 10")
+
+chat(messages, stop_sequences=["5"])           # → "1, 2, 3, 4, "
+chat(messages, stop_sequences=["5", "3, 4"])   # stops at whichever appears first
+```
+
+Useful for:
+
+- Limiting the length of the answer.
+- Stopping at natural breakpoints in structured output.
+- Not letting Claude continue past a marker or delimiter.
+
+> Combined, these two techniques shape answers in ways prompting alone can't — see
+> [Structured data](#10-structured-data).
+
+📓 [004_Controlling_Output_complete.ipynb](exercises/004_Controlling_Output_complete.ipynb)
 
 ## 10. Structured data
 
