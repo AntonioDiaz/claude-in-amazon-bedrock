@@ -477,19 +477,66 @@ Useful for:
 
 ## 10. Structured data
 
-To get clean JSON or code with no explanation around it, combine both techniques:
-prefill `` ```json `` and stop at `` ``` ``.
+When you ask for JSON, code or a list, Claude tends to be "helpful" and wraps it with a header,
+markdown fences and an explanation. Great for reading, bad when you need the **raw data**.
+
+### The problem
+
+Example: a web app that generates **AWS EventBridge rules**. The user wants clean JSON to copy, but
+by default Claude answers something like:
+
+~~~markdown
+# EventBridge Rule
+```json
+{
+  "source": ["aws.ec2"],
+  "detail-type": ["EC2 Instance State-change Notification"],
+  "detail": {"state": ["running"]}
+}
+```
+This rule captures EC2 instance state changes when instances start running or stop.
+~~~
+
+The user can't copy the whole answer; they have to select just the JSON.
+
+### The solution: prefill + stop sequence
 
 ```python
-messages = [
-    {"role": "user", "content": [{"text": "Generate 3 AWS CLI commands as JSON"}]},
-    {"role": "assistant", "content": [{"text": "```json"}]},   # prefill
-]
-response = client.converse(
-    modelId=model_id, messages=messages,
-    inferenceConfig={"stopSequences": ["```"]},
-)
+messages = []
+add_user_message(messages, "Generate a very short event bridge rule as json")
+add_assistant_message(messages, "```json")       # prefill the opening fence
+
+text = chat(messages, stop_sequences=["```"])   # stop at the closing fence
 ```
+
+1. **Prefill** the assistant message with the opening delimiter (`` ```json ``).
+2. Claude believes it already opened the code block, so it skips the header and writes the JSON directly.
+3. When it tries to close the block with `` ``` ``, the **stop sequence** halts generation.
+4. You get only what's between the delimiters.
+
+```mermaid
+flowchart LR
+    A["prefill: opening fence"] --> B["Claude writes the JSON"] --> C["Claude emits closing fence"] --> D["stop sequence → return"]
+```
+
+### Cleaning the result
+
+The text may have leading/trailing newlines:
+
+```python
+import json
+
+data = json.loads(text.strip())   # JSON: parse to validate and use it
+clean_text = text.strip()         # other formats: just strip
+```
+
+### Beyond JSON
+
+Works for any format where clean, copyable output matters: Python code, bulleted lists, CSV,
+config files…
+
+> The trick: find the delimiters Claude would naturally put around that content, **prefill the
+> opening one and stop at the closing one**.
 
 ## 11. Structured data exercise
 
