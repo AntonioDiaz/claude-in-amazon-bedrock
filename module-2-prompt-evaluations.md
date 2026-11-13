@@ -410,7 +410,135 @@ version also passes `solution_criteria` to the grader and averages the model sco
 
 ## 6. Code based grading
 
-_Pending._
+Adds a second, deterministic check to the eval: does the output have the **right format** and
+**valid syntax**? Very useful when the prompt generates code, JSON or regex.
+
+### What it checks
+
+| Criterion | Question |
+|---|---|
+| **Format** | Does the output contain only the requested format (Python, JSON or regex), with no explanation? |
+| **Valid syntax** | Can it actually be parsed / compiled? |
+
+Scoring is binary: **parses → 10**, **error → 0**.
+
+### Validation functions
+
+One per format, using Python's built-in parsers:
+
+```python
+import ast
+import json
+import re
+
+def validate_json(text):
+    try:
+        json.loads(text.strip())
+        return 10
+    except json.JSONDecodeError:
+        return 0
+
+def validate_python(text):
+    try:
+        ast.parse(text.strip())      # builds the syntax tree, doesn't run the code
+        return 10
+    except SyntaxError:
+        return 0
+
+def validate_regex(text):
+    try:
+        re.compile(text.strip())
+        return 10
+    except re.error:
+        return 0
+
+def grade_syntax(response, test_case):
+    fmt = test_case["format"]
+    if fmt == "json":
+        return validate_json(response)
+    elif fmt == "python":
+        return validate_python(response)
+    else:
+        return validate_regex(response)
+```
+
+| Format | Parser |
+|---|---|
+| JSON | `json.loads()` |
+| Python | `ast.parse()` |
+| Regex | `re.compile()` |
+
+### Add the format to the dataset
+
+The grader must know which validator to use, so each test case gets a `format` field. Update the
+dataset generation prompt (section 3) to produce it:
+
+```json
+{
+  "task": "Description of task",
+  "format": "python",
+  "solution_criteria": "Key criteria for evaluating the solution"
+}
+```
+
+`format` is `"json"`, `"python"` or `"regex"`. The notebook also adds `solution_criteria`, which is
+passed to the model grader.
+
+### Improve the prompt for the code grader
+
+Tell Claude explicitly to return only code:
+
+```python
+prompt = f"""
+Please solve the following task:
+
+{test_case["task"]}
+
+* Respond only with Python, JSON, or a plain Regex
+* Do not add any comments or commentary or explanation
+"""
+```
+
+And reuse prefill + stop sequence so no markdown fence or text gets in:
+
+```python
+add_assistant_message(messages, "```code")
+output = chat(messages, stop_sequences=["```"])
+```
+
+### Combining the scores
+
+```python
+def run_test_case(test_case):
+    output = run_prompt(test_case)
+
+    model_grade = grade_by_model(test_case, output)
+    model_score = model_grade["score"]
+    syntax_score = grade_syntax(output, test_case)
+
+    score = (model_score + syntax_score) / 2      # equal weight
+
+    return {
+        "output": output,
+        "test_case": test_case,
+        "score": score,
+        "reasoning": model_grade["reasoning"],
+    }
+```
+
+| Score | Measures |
+|---|---|
+| Model grader | Content quality, task following |
+| Code grader | Technical correctness (format + syntax) |
+
+Equal weight is the simple default; change the weights if one matters more for your use case.
+
+### Reading the results
+
+The combined score covers both **semantic quality** and **technical correctness**. A single score on
+its own says little: its value is as a **baseline** to compare against as you change the prompt.
+
+📓 [001_Prompt_Evals_complete.ipynb](exercises/module_2/001_Prompt_Evals_complete.ipynb) · 🗂️ [dataset.json](exercises/module_2/dataset.json)
 
 ## 7. Exercise on prompt evals
 
