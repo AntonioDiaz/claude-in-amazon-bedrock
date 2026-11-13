@@ -2,14 +2,27 @@
 
 ## Contents
 
-1. [Prompt engineering](#1-prompt-engineering)
-2. [Being clear and direct](#2-being-clear-and-direct)
-3. [Being specific](#3-being-specific)
-4. [Structure with XML tags](#4-structure-with-xml-tags)
-5. [Providing examples](#5-providing-examples)
-6. [Exercise on prompting](#6-exercise-on-prompting)
-7. [Quiz on prompt engineering](#7-quiz-on-prompt-engineering)
-8. [Common pitfalls](#common-pitfalls)
+- [Module 3 — Prompt engineering](#module-3--prompt-engineering)
+  - [Contents](#contents)
+  - [1. Prompt engineering](#1-prompt-engineering)
+    - [The improvement loop](#the-improvement-loop)
+    - [The running example](#the-running-example)
+    - [Eval pipeline: `PromptEvaluator`](#eval-pipeline-promptevaluator)
+    - [Generating the dataset](#generating-the-dataset)
+    - [Baseline prompt (v1)](#baseline-prompt-v1)
+    - [Running the evaluation](#running-the-evaluation)
+    - [Reading the results](#reading-the-results)
+  - [2. Being clear and direct](#2-being-clear-and-direct)
+    - [Clear](#clear)
+    - [Direct](#direct)
+    - [Applied to the meal plan prompt](#applied-to-the-meal-plan-prompt)
+    - [Result](#result)
+  - [3. Being specific](#3-being-specific)
+  - [4. Structure with XML tags](#4-structure-with-xml-tags)
+  - [5. Providing examples](#5-providing-examples)
+  - [6. Exercise on prompting](#6-exercise-on-prompting)
+  - [7. Quiz on prompt engineering](#7-quiz-on-prompt-engineering)
+  - [Common pitfalls](#common-pitfalls)
 
 ---
 
@@ -115,7 +128,52 @@ A low first score is normal: it's the **baseline**. The next lessons apply one t
 
 ## 2. Being clear and direct
 
-_Pending._
+The **first line** of the prompt is the most important part: it sets up everything that follows.
+Make it clear and direct.
+
+### Clear
+
+- Simple language anyone can understand.
+- Say exactly what you want, without going around it.
+- Open with a plain statement of Claude's task.
+
+| ❌ Vague | ✅ Clear |
+|---|---|
+| *"I need to know about those things people put on their roofs that use sun — those solar panel things, I think they're called"* | *"Write three paragraphs about how solar panels work."* |
+
+### Direct
+
+- Use **instructions, not questions**.
+- Start with an **action verb**: *Write*, *Create*, *Generate*, *Identify*…
+
+| ❌ Question | ✅ Instruction |
+|---|---|
+| *"I was reading about renewable energy and geothermal energy sounds neat. What countries use it?"* | *"Identify three countries that use geothermal energy. Include generation stats for each."* |
+
+### Applied to the meal plan prompt
+
+```diff
+- What should this person eat?
++ Generate a one-day meal plan for an athlete that meets their dietary restrictions.
+```
+
+The new first line tells Claude:
+
+| | |
+|---|---|
+| **Action** | Generate |
+| **What** | A meal plan |
+| **Constraints** | One day · for an athlete · respecting dietary restrictions |
+
+### Result
+
+| Version | Change | Score |
+|---|---|---|
+| v1 | Naive prompt | 2.32 |
+| v2 | Clear and direct first line | **3.92** |
+
+> Treat Claude like a capable assistant who needs clear direction, not someone who has to guess.
+> Lead with an action verb and the task.
 
 ## 3. Being specific
 
