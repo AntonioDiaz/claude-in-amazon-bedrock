@@ -134,15 +134,279 @@ keep iterating.
 
 ## 3. Generating test datasets
 
-_Pending._
+From here on the module builds a **custom eval pipeline** for one concrete prompt.
+
+### The goal
+
+A prompt that helps users write **AWS-specific code**. Given a task description, it returns one of:
+
+- Python code
+- JSON configuration
+- A regular expression
+
+**Requirement:** only the code, with no headers, footers or explanations.
+
+First version, kept simple on purpose:
+
+```python
+prompt = f"Please provide a solution to the following task: {task}"
+```
+
+### Evaluation dataset
+
+Input examples that are merged one by one into the prompt and sent to Claude, to see how the prompt
+behaves across different scenarios. Two ways to build it:
+
+- **By hand.**
+- **Generated with Claude** → use a fast, cheap model like **Haiku**, since you generate many cases.
+
+### Generating it with code
+
+```python
+import json
+
+def generate_dataset():
+    prompt = """
+    Generate 3 AWS-related tasks that require Python, JSON, or Regex solutions.
+
+    Focus on tasks that can be solved by writing a single Python function,
+    a single JSON object, or tasks that do not require writing much code.
+
+    Example output:
+    [
+        {
+            "task": "Description of task"
+        },
+        ...additional
+    ]
+
+    Please generate 3 objects.
+    """
+
+    messages = []
+    add_user_message(messages, prompt)
+    add_assistant_message(messages, "```json")
+    text = chat(messages, stop_sequences=["```"])
+    return json.loads(text)
+```
+
+It reuses the **prefill + stop sequence** technique from
+[Module 1 › Structured data](module-1-working-with-the-api.md#10-structured-data) to get clean JSON.
+
+### Saving the dataset
+
+Save it once so you don't regenerate it (and pay for it) on every run:
+
+```python
+dataset = generate_dataset()
+with open("dataset.json", "w") as f:
+    json.dump(dataset, f, indent=2)
+```
+
+Example of generated tasks:
+
+- Extract the account ID from an ARN (Python).
+- Write a JSON schema for an EC2 configuration (JSON).
+- Regex that validates S3 bucket names (Regex).
+
+> Three cases are enough while building the pipeline; a real evaluation needs many more, with more
+> variety and edge cases.
+
+📓 [001_Prompt_Evals_complete.ipynb](exercises/module_2/001_Prompt_Evals_complete.ipynb) · 🗂️ [dataset.json](exercises/module_2/dataset.json)
 
 ## 4. Running the eval
 
-_Pending._
+With the dataset ready, the core pipeline takes each test case, merges it with the prompt, sends it
+to Claude and grades the output.
+
+```mermaid
+flowchart LR
+    D[(dataset.json)] --> E["run_eval<br/>loop over cases"]
+    E --> T["run_test_case"]
+    T --> P["run_prompt<br/>prompt + task → Claude"]
+    P --> T
+    T --> G["grade<br/>(placeholder: 10)"]
+    G --> R[(results)]
+```
+
+### Three functions, one job each
+
+| Function | Responsibility |
+|---|---|
+| `run_prompt(test_case)` | Merge the test case into the prompt template, call Claude, return the output |
+| `run_test_case(test_case)` | Call `run_prompt`, grade the output, return a result dict |
+| `run_eval(dataset)` | Loop over the dataset and collect every result |
+
+### `run_prompt`
+
+```python
+def run_prompt(test_case):
+    """Merges the prompt and test case input, then returns the result"""
+    prompt = f"""
+Please solve the following task:
+
+{test_case["task"]}
+"""
+    messages = []
+    add_user_message(messages, prompt)
+    output = chat(messages)
+    return output
+```
+
+Deliberately simple: **no formatting instructions**, so Claude's answers will be more verbose than
+needed. That gets fixed later by iterating on the prompt.
+
+### `run_test_case`
+
+```python
+def run_test_case(test_case):
+    """Calls run_prompt, then grades the result"""
+    output = run_prompt(test_case)
+
+    # TODO - Grading
+    score = 10
+
+    return {
+        "output": output,
+        "test_case": test_case,
+        "score": score,
+    }
+```
+
+The score is **hard-coded to 10** for now, just to test the pipeline end to end. Real grading comes in
+the next lessons.
+
+### `run_eval`
+
+```python
+def run_eval(dataset):
+    """Loads the dataset and calls run_test_case with each case"""
+    results = []
+    for test_case in dataset:
+        result = run_test_case(test_case)
+        results.append(result)
+    return results
+```
+
+### Running it
+
+```python
+with open("dataset.json", "r") as f:
+    dataset = json.load(f)
+
+results = run_eval(dataset)
+print(json.dumps(results, indent=2))
+```
+
+- It's **slow**: even with Haiku, a full dataset can take 30+ seconds (calls run one after another). Optimization comes later.
+- `results` is a list with one object per test case: Claude's `output` (quite verbose at this stage), the original `test_case` and the `score`.
+
+### Where we are
+
+- ✅ Read test cases from the dataset
+- ✅ Merge them with the prompt template
+- ✅ Get Claude's responses
+- ✅ Collect and organize the results
+- ❌ **Real grading**: every answer still gets a fixed 10
+
+> This orchestration is the backbone of most eval systems. The hard parts are the **grading logic**
+> and **prompt optimization**, not the loop.
+
+📓 [001_Prompt_Evals_complete.ipynb](exercises/module_2/001_Prompt_Evals_complete.ipynb)
 
 ## 5. Model based grading
 
-_Pending._
+A **grader** takes the model's output and returns a measurable signal, usually a score from 1 (poor)
+to 10 (excellent).
+
+### Types of graders
+
+| Grader | How | Good for |
+|---|---|---|
+| **Code** | Your own programmatic checks | Output length · required/forbidden words · syntax of JSON/Python/regex · readability scores |
+| **Model** | An extra API call where a model evaluates the output | Response quality · instruction following · completeness · helpfulness · safety |
+| **Human** | People review and score by hand | Overall quality · depth · conciseness · relevance — most flexible, but slow and tedious |
+
+A code grader just has to return some measurable value; a model grader is the most flexible automated option.
+
+### Define the criteria first
+
+Before writing any grader, decide what "good" means. For the AWS code prompt:
+
+| Criterion | Meaning | Best grader |
+|---|---|---|
+| **Format** | Only Python, JSON or regex, no explanation | Code |
+| **Valid syntax** | The code parses | Code |
+| **Task following** | Directly solves the task with correct code | Model |
+
+### Implementing a model grader
+
+```python
+def grade_by_model(test_case, output):
+    eval_prompt = f"""
+You are an expert code reviewer. Evaluate this AI-generated solution.
+
+<task>
+{test_case["task"]}
+</task>
+
+<solution>
+{output}
+</solution>
+
+Provide your evaluation as a structured JSON object with:
+- "strengths": An array of 1-3 key strengths
+- "weaknesses": An array of 1-3 key areas for improvement
+- "reasoning": A concise explanation of your assessment
+- "score": A number between 1-10
+"""
+    messages = []
+    add_user_message(messages, eval_prompt)
+    add_assistant_message(messages, "```json")
+    eval_text = chat(messages, stop_sequences=["```"])
+    return json.loads(eval_text)
+```
+
+> **Key idea:** ask for **strengths, weaknesses and reasoning before the score**. With only a number,
+> models tend to give middling scores (around 6).
+
+⚠️ The lesson's snippet uses a plain string with `{task}` / `{solution}`, so nothing gets filled in.
+It must be an **f-string** (as above and in the notebook).
+
+### Plugging it into the pipeline
+
+```python
+def run_test_case(test_case):
+    output = run_prompt(test_case)
+
+    model_grade = grade_by_model(test_case, output)
+
+    return {
+        "output": output,
+        "test_case": test_case,
+        "score": model_grade["score"],
+        "reasoning": model_grade["reasoning"],
+    }
+```
+
+### Average score
+
+```python
+from statistics import mean
+
+def run_eval(dataset):
+    results = [run_test_case(tc) for tc in dataset]
+    average_score = mean(r["score"] for r in results)
+    print(f"Average score: {average_score}")
+    return results
+```
+
+The average is the single number you track across prompt versions. Model graders can be a bit
+inconsistent, but they're a solid starting point.
+
+📓 [001_Prompt_Evals_complete.ipynb](exercises/module_2/001_Prompt_Evals_complete.ipynb) — the final
+version also passes `solution_criteria` to the grader and averages the model score with a syntax score
+(see [Code based grading](#6-code-based-grading)).
 
 ## 6. Code based grading
 
