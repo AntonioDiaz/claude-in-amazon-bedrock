@@ -18,6 +18,10 @@
     - [Applied to the meal plan prompt](#applied-to-the-meal-plan-prompt)
     - [Result](#result)
   - [3. Being specific](#3-being-specific)
+    - [Two types of guidelines](#two-types-of-guidelines)
+    - [Applied to the meal plan prompt (quality guidelines)](#applied-to-the-meal-plan-prompt-quality-guidelines)
+    - [Result](#result-1)
+    - [When to add process steps](#when-to-add-process-steps)
   - [4. Structure with XML tags](#4-structure-with-xml-tags)
   - [5. Providing examples](#5-providing-examples)
   - [6. Exercise on prompting](#6-exercise-on-prompting)
@@ -190,7 +194,7 @@ Often used together in real applications:
 | | Quality guidelines | Process steps |
 |---|---|---|
 | Controls | **What** the output looks like | **How** Claude gets to it |
-| Examples (short story) | Keep under 1,000 words · include a clear action that reveals the talent · at least one supporting character | 1. Brainstorm 3 talents that create dramatic tension · 2. Pick the most interesting · 3. Outline a pivotal scene that reveals it · 4. Brainstorm 3 supporting character types that increase the impact |
+| Examples (short story) | • Keep under 1,000 words<br>• Include a clear action that reveals the talent<br>• At least one supporting character | 1. Brainstorm 3 talents that create dramatic tension<br>2. Pick the most interesting<br>3. Outline a pivotal scene that reveals it<br>4. Brainstorm 3 supporting character types that increase the impact |
 
 ### Applied to the meal plan prompt (quality guidelines)
 
