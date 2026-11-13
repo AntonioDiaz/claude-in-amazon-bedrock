@@ -177,7 +177,66 @@ The new first line tells Claude:
 
 ## 3. Being specific
 
-_Pending._
+Don't leave everything to the model's interpretation: give **guidelines or steps** that point Claude
+to the output you want.
+
+*"Write a short story about a character who discovers a hidden talent"* could become 200 or 2,000
+words, one character or five, any structure. Specific guidelines narrow that down.
+
+### Two types of guidelines
+
+Often used together in real applications:
+
+| | Quality guidelines | Process steps |
+|---|---|---|
+| Controls | **What** the output looks like | **How** Claude gets to it |
+| Examples (short story) | Keep under 1,000 words · include a clear action that reveals the talent · at least one supporting character | 1. Brainstorm 3 talents that create dramatic tension · 2. Pick the most interesting · 3. Outline a pivotal scene that reveals it · 4. Brainstorm 3 supporting character types that increase the impact |
+
+### Applied to the meal plan prompt (quality guidelines)
+
+```text
+Generate a one-day meal plan for an athlete that meets their dietary restrictions.
+
+- Height: {prompt_inputs["height"]}
+- Weight: {prompt_inputs["weight"]}
+- Goal: {prompt_inputs["goal"]}
+- Dietary restrictions: {prompt_inputs["restrictions"]}
+
+Guidelines:
+1. Include accurate daily calorie amount
+2. Show protein, fat, and carb amounts
+3. Specify when to eat each meal
+4. Use only foods that fit restrictions
+5. List all portion sizes in grams
+6. Keep budget-friendly if mentioned
+```
+
+### Result
+
+| Version | Change | Score |
+|---|---|---|
+| v1 | Naive prompt | 2.32 |
+| v2 | Clear and direct first line | 3.92 |
+| v3a | + quality guidelines | **7.86** |
+| v3b | + process steps (calories → macros → meal timing…) | 7.3 |
+
+Quality guidelines more than doubled the score.
+
+### When to add process steps
+
+Quality guidelines are enough for most prompts. Add steps for:
+
+- Troubleshooting hard problems
+- Decision making
+- Critical thinking
+- Any time you want Claude to take a **wider view**
+
+Example: *"Why did the sales team's numbers drop 30% last quarter?"* → give steps that force it to look
+at market conditions, individual performance, organizational changes and customer feedback, instead of
+jumping to the first obvious explanation.
+
+> Being specific turns results from luck into something consistent: guidelines, steps or both give
+> Claude a clear frame to work in.
 
 ## 4. Structure with XML tags
 
