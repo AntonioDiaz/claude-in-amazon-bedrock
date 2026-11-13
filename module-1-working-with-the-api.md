@@ -2,19 +2,51 @@
 
 ## Contents
 
-1. [Accessing the API](#1-accessing-the-api)
-2. [Making a request](#2-making-a-request)
-3. [Multi-turn conversations](#3-multi-turn-conversations)
-4. [Chat bot exercise](#4-chat-bot-exercise)
-5. [System prompts](#5-system-prompts)
-6. [System prompt exercise](#6-system-prompt-exercise)
-7. [Temperature](#7-temperature)
-8. [Streaming](#8-streaming)
-9. [Controlling model output](#9-controlling-model-output)
-10. [Structured data](#10-structured-data)
-11. [Structured data exercise](#11-structured-data-exercise)
-12. [Quiz on working with the API](#12-quiz-on-working-with-the-api)
-13. [Common pitfalls](#common-pitfalls)
+- [Module 1 — Working with the API](#module-1--working-with-the-api)
+  - [Contents](#contents)
+  - [1. Accessing the API](#1-accessing-the-api)
+    - [What happens behind a chat app](#what-happens-behind-a-chat-app)
+    - [Two APIs to call Claude](#two-apis-to-call-claude)
+  - [2. Making a request](#2-making-a-request)
+    - [Client](#client)
+    - [Model ID and Regions](#model-id-and-regions)
+    - [User message](#user-message)
+    - [Calling `converse` and reading the answer](#calling-converse-and-reading-the-answer)
+    - [Message types](#message-types)
+  - [3. Multi-turn conversations](#3-multi-turn-conversations)
+    - [Nothing is stored](#nothing-is-stored)
+    - [Helper functions](#helper-functions)
+    - [Building the conversation](#building-the-conversation)
+    - [Roles must alternate](#roles-must-alternate)
+  - [4. Chat bot exercise](#4-chat-bot-exercise)
+  - [5. System prompts](#5-system-prompts)
+    - [Why not put the rules in the user message?](#why-not-put-the-rules-in-the-user-message)
+    - [Give Claude a role instead](#give-claude-a-role-instead)
+    - [Implementation](#implementation)
+    - [Effect](#effect)
+    - [Technical details](#technical-details)
+  - [6. System prompt exercise](#6-system-prompt-exercise)
+  - [7. Temperature](#7-temperature)
+    - [How Claude generates text](#how-claude-generates-text)
+    - [What temperature changes](#what-temperature-changes)
+    - [Which value to use](#which-value-to-use)
+    - [In code](#in-code)
+    - [In practice: movie ideas](#in-practice-movie-ideas)
+  - [8. Streaming](#8-streaming)
+    - [How it works](#how-it-works)
+    - [Stream events](#stream-events)
+    - [Extracting the text](#extracting-the-text)
+    - [In a real app](#in-a-real-app)
+    - [Things to remember](#things-to-remember)
+  - [9. Controlling model output](#9-controlling-model-output)
+    - [Prefilled assistant messages](#prefilled-assistant-messages)
+    - [Stop sequences](#stop-sequences)
+  - [10. Structured data](#10-structured-data)
+    - [The problem](#the-problem)
+    - [The solution: prefill + stop sequence](#the-solution-prefill--stop-sequence)
+    - [Cleaning the result](#cleaning-the-result)
+    - [Beyond JSON](#beyond-json)
+  - [Common pitfalls](#common-pitfalls)
 
 ---
 
@@ -537,14 +569,6 @@ config files…
 
 > The trick: find the delimiters Claude would naturally put around that content, **prefill the
 > opening one and stop at the closing one**.
-
-## 11. Structured data exercise
-
-_Pending._
-
-## 12. Quiz on working with the API
-
-_Pending._
 
 ---
 

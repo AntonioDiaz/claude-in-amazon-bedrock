@@ -23,9 +23,24 @@
     - [Result](#result-1)
     - [When to add process steps](#when-to-add-process-steps)
   - [4. Structure with XML tags](#4-structure-with-xml-tags)
+    - [Why structure matters](#why-structure-matters)
+    - [Tag names](#tag-names)
+    - [Example: code vs documentation](#example-code-vs-documentation)
+    - [Applied to the meal plan prompt](#applied-to-the-meal-plan-prompt-1)
+    - [When to use XML tags](#when-to-use-xml-tags)
   - [5. Providing examples](#5-providing-examples)
+    - [How it works: sentiment analysis](#how-it-works-sentiment-analysis)
+    - [Corner cases](#corner-cases)
+    - [When to use examples](#when-to-use-examples)
+    - [Finding good examples in your evals](#finding-good-examples-in-your-evals)
+    - [Explain why the example is good](#explain-why-the-example-is-good)
+    - [Best practices](#best-practices)
   - [6. Exercise on prompting](#6-exercise-on-prompting)
-  - [7. Quiz on prompt engineering](#7-quiz-on-prompt-engineering)
+    - [1 · Dataset](#1--dataset)
+    - [2 · Prompt](#2--prompt)
+    - [3 · Evaluation](#3--evaluation)
+    - [Possible next improvements](#possible-next-improvements)
+    - [Reference: final meal plan prompt](#reference-final-meal-plan-prompt)
   - [Common pitfalls](#common-pitfalls)
 
 ---
@@ -244,19 +259,226 @@ jumping to the first obvious explanation.
 
 ## 4. Structure with XML tags
 
-_Pending._
+When a prompt carries a lot of content, Claude can struggle to tell which pieces of text belong
+together, or which part is instructions and which is data. **XML tags** add structure, especially
+when you interpolate large amounts of data.
+
+### Why structure matters
+
+Example: analyzing 20 pages of sales records. With no clear boundaries, Claude can mix up your
+instructions with the records. Wrapping the records in tags separates them:
+
+```xml
+<sales_records>
+{sales_records}
+</sales_records>
+```
+
+### Tag names
+
+- They work as **delimiters**; no official XML spec to follow.
+- Make up names that describe the content: `sales_records`, `data`, `records`…
+- **Specific names work better** than generic ones.
+
+### Example: code vs documentation
+
+Without tags it's unclear which text is the buggy code and which is the docs. With tags:
+
+```xml
+<my_code>
+from datavortex import Pipeline, DataSource
+
+def process_data(input_file, output_file):
+    pipeline = Pipeline()
+    source = DataSource.from_csv(input_file)
+</my_code>
+
+<docs>
+# Creating a data source from data vortex
+csv_source = DataSource.from_csv("data.csv")
+</docs>
+```
+
+Now Claude knows what to debug (`<my_code>`) and what should guide the fix (`<docs>`).
+
+### Applied to the meal plan prompt
+
+Even with little content, grouping the athlete's data makes it clear it's **external input** that
+should shape the plan:
+
+```xml
+<athlete_information>
+- Height: {prompt_inputs["height"]}
+- Weight: {prompt_inputs["weight"]}
+- Goal: {prompt_inputs["goal"]}
+- Dietary restrictions: {prompt_inputs["restrictions"]}
+</athlete_information>
+```
+
+### When to use XML tags
+
+- Large amounts of context or data.
+- Several distinct types of content in one prompt.
+- You want the boundaries between sections to be obvious.
+- Interpolated content could be mistaken for instructions.
+
+> With simple prompts the gain may be small, but tags help Claude understand your intent and give
+> more consistent, accurate answers.
 
 ## 5. Providing examples
 
-_Pending._
+One of the most effective techniques: give Claude **sample input → ideal output** pairs.
+
+| Name | Examples in the prompt |
+|---|---|
+| **One-shot** | One example |
+| **Multi-shot** | Several examples (e.g. to cover different corner cases) |
+
+### How it works: sentiment analysis
+
+Task: classify a tweet as **Positive** or **Negative**. The hard part is **sarcasm**:
+
+> *"Yeah, sure, that was the best movie I've seen since 'Plan 9 from Outer Space'"*
+
+Looks positive, but it's negative (*Plan 9* is famously bad). An example shows Claude how to handle it.
+
+Key elements:
+
+- A clear introduction: *"Here is an example input with an ideal response"*.
+- XML tags for structure: `<sample_input>` and `<ideal_output>`.
+- Concrete examples of the behavior you want.
+
+### Corner cases
+
+Point out what to watch for, then show it:
+
+```xml
+Be especially careful with tweets that contain sarcasm.
+For example:
+<sample_input>
+Oh yeah, I really needed a flight delay tonight! Excellent!
+</sample_input>
+<ideal_output>
+Negative
+</ideal_output>
+```
+
+### When to use examples
+
+- Capturing **corner cases** and edge scenarios.
+- Defining **complex output formats** (e.g. a specific JSON structure).
+- Showing exactly what **"good" output** looks like.
+
+### Finding good examples in your evals
+
+Open the eval's **`output.html`** report, find the best-scoring case (ideally a 10) and copy its
+input and output into the prompt as the example.
+
+### Explain why the example is good
+
+After the example, add a short sentence saying **why** it's ideal, so Claude learns the reason and not
+just the shape:
+
+```xml
+<ideal_output>
+[Your example output here]
+</ideal_output>
+
+This example meal plan is well-structured, provides detailed information on food choices and
+quantities, and aligns with the athlete's goals and restrictions.
+```
+
+### Best practices
+
+- Structure examples with **XML tags**.
+- Be **explicit** about what the example is showing.
+- Pick **representative** examples of your main use cases.
+- Include **corner cases** that might trip the model up.
+- **Explain why** an example is good when it isn't obvious.
+
+> One-shot and multi-shot prompting are the go-to tools for consistent, well-formatted output and for
+> handling tricky edge cases reliably.
 
 ## 6. Exercise on prompting
 
-_Pending._
+📓 [003_exercise.ipynb](exercises/module_3/003_exercise.ipynb)
 
-## 7. Quiz on prompt engineering
+Same workflow as the meal plan, applied to a new task: **extract the topics from a paragraph of a
+scholarly article into a JSON array of strings**.
 
-_Pending._
+### 1 · Dataset
+
+```python
+evaluator = PromptEvaluator(max_concurrent_tasks=2)   # low concurrency → fewer rate limit errors
+
+dataset = evaluator.generate_dataset(
+    task_description="Extract topics out of a passage of text from a scholarly article into a JSON array of strings",
+    prompt_inputs_spec={
+        "content": "One paragraph of text from a scholarly journal written in English"
+    },
+    output_file="dataset.json",
+    num_cases=4,
+)
+```
+
+### 2 · Prompt
+
+Applies the techniques from this module:
+
+```python
+def run_prompt(prompt_inputs):
+    prompt = f"""
+Extract key topics mentioned from a passage of text from a scholarly journal into a JSON array of strings.
+
+<text>
+{prompt_inputs["content"]}
+</text>
+
+Follow these steps:
+1. Closely examine the provided text
+2. Identify each topic mentioned
+3. Add each topic to a JSON array
+4. Respond with the JSON array. Do not provide any other text or commentary
+"""
+    messages = []
+    add_user_message(messages, prompt)
+    return chat(messages)
+```
+
+| Technique | Where |
+|---|---|
+| [Clear and direct](#2-being-clear-and-direct) | First line: action verb (*Extract*) + task + output format |
+| [XML tags](#4-structure-with-xml-tags) | The passage goes inside `<text>`, separated from the instructions |
+| [Being specific](#3-being-specific) | Numbered **process steps**, ending with "only the JSON array" |
+
+### 3 · Evaluation
+
+`extra_criteria` tells the grader what a correct answer looks like:
+
+```python
+results = evaluator.run_evaluation(
+    run_prompt_function=run_prompt,
+    dataset_file="dataset.json",
+    extra_criteria="""
+- Contains a JSON array of strings, containing each topic mentioned in the article.
+- The strings should contain only a topic without any extra commentary
+- Response should contain the JSON array and nothing else
+""",
+)
+```
+
+Open `output.html` to check the score per case and the grader's reasoning, then iterate.
+
+### Possible next improvements
+
+- **Prefill + stop sequence** (`` ```json `` / `` ``` ``) to guarantee nothing but JSON ([Module 1 › Structured data](module-1-working-with-the-api.md#10-structured-data)).
+- An **example** (`<sample_input>` / `<ideal_output>`) showing how granular a "topic" should be ([Providing examples](#5-providing-examples)).
+
+### Reference: final meal plan prompt
+
+📓 [002_prompting_completed.ipynb](exercises/module_3/002_prompting_completed.ipynb) contains the meal
+plan prompt with **all** the techniques combined: clear first line, `<athlete_information>` tags,
+the 6 guidelines and a one-shot example with an explanation of why it's good.
 
 ---
 
