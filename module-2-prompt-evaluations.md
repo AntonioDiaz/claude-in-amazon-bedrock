@@ -15,11 +15,30 @@
     - [Step 5 · Change the prompt and repeat](#step-5--change-the-prompt-and-repeat)
     - [Comparing versions](#comparing-versions)
   - [3. Generating test datasets](#3-generating-test-datasets)
+    - [The goal](#the-goal)
+    - [Evaluation dataset](#evaluation-dataset)
+    - [Generating it with code](#generating-it-with-code)
+    - [Saving the dataset](#saving-the-dataset)
   - [4. Running the eval](#4-running-the-eval)
+    - [Three functions, one job each](#three-functions-one-job-each)
+    - [function: `run_prompt`](#function-run_prompt)
+    - [function: `run_test_case`](#function-run_test_case)
+    - [function: `run_eval`](#function-run_eval)
+    - [Running it](#running-it)
+    - [Where we are](#where-we-are)
   - [5. Model based grading](#5-model-based-grading)
+    - [Types of graders](#types-of-graders)
+    - [Define the criteria first](#define-the-criteria-first)
+    - [Implementing a model grader](#implementing-a-model-grader)
+    - [Plugging it into the pipeline](#plugging-it-into-the-pipeline)
+    - [Average score](#average-score)
   - [6. Code based grading](#6-code-based-grading)
-  - [7. Exercise on prompt evals](#7-exercise-on-prompt-evals)
-  - [8. Quiz on prompt evaluations](#8-quiz-on-prompt-evaluations)
+    - [What it checks](#what-it-checks)
+    - [Validation functions](#validation-functions)
+    - [Add the format to the dataset](#add-the-format-to-the-dataset)
+    - [Improve the prompt for the code grader](#improve-the-prompt-for-the-code-grader)
+    - [Combining the scores](#combining-the-scores)
+    - [Reading the results](#reading-the-results)
   - [Common pitfalls](#common-pitfalls)
 
 ---
@@ -237,7 +256,7 @@ flowchart LR
 | `run_test_case(test_case)` | Call `run_prompt`, grade the output, return a result dict |
 | `run_eval(dataset)` | Loop over the dataset and collect every result |
 
-### `run_prompt`
+### function: `run_prompt`
 
 ```python
 def run_prompt(test_case):
@@ -256,7 +275,7 @@ Please solve the following task:
 Deliberately simple: **no formatting instructions**, so Claude's answers will be more verbose than
 needed. That gets fixed later by iterating on the prompt.
 
-### `run_test_case`
+### function: `run_test_case`
 
 ```python
 def run_test_case(test_case):
@@ -276,7 +295,7 @@ def run_test_case(test_case):
 The score is **hard-coded to 10** for now, just to test the pipeline end to end. Real grading comes in
 the next lessons.
 
-### `run_eval`
+### function: `run_eval`
 
 ```python
 def run_eval(dataset):
@@ -539,14 +558,6 @@ The combined score covers both **semantic quality** and **technical correctness*
 its own says little: its value is as a **baseline** to compare against as you change the prompt.
 
 📓 [001_Prompt_Evals_complete.ipynb](exercises/module_2/001_Prompt_Evals_complete.ipynb) · 🗂️ [dataset.json](exercises/module_2/dataset.json)
-
-## 7. Exercise on prompt evals
-
-_Pending._
-
-## 8. Quiz on prompt evaluations
-
-_Pending._
 
 ---
 
