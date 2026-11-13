@@ -23,7 +23,7 @@ prompt caching, the Model Context Protocol (MCP), and agents with Claude Code an
 0. [Course introduction & Claude models](module-0-intro-claude-models.md)
 1. [Working with the API](module-1-working-with-the-api.md)
 2. [Prompt evaluations](module-2-prompt-evaluations.md)
-3. Prompt engineering
+3. [Prompt engineering](module-3-prompt-engineering.md)
 4. Tool use (function calling)
 5. Retrieval Augmented Generation (RAG)
 6. Features of Claude
