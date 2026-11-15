@@ -21,6 +21,12 @@
     - [Writing good descriptions](#writing-good-descriptions)
     - [Final shape (Converse `toolSpec`)](#final-shape-converse-toolspec)
   - [4. Handling tool use responses](#4-handling-tool-use-responses)
+    - [`toolChoice`: when Claude uses tools](#toolchoice-when-claude-uses-tools)
+    - [Multi-part assistant message](#multi-part-assistant-message)
+    - [The `toolUse` part](#the-tooluse-part)
+    - [Conversation flow with tools](#conversation-flow-with-tools)
+    - [Updated helper functions](#updated-helper-functions)
+    - [Check the stop reason](#check-the-stop-reason)
   - [5. Running tool functions](#5-running-tool-functions)
   - [6. Sending tool results](#6-sending-tool-results)
   - [7. Multi-Turn conversations with tools](#7-multi-turn-conversations-with-tools)
@@ -217,7 +223,119 @@ get_current_datetime_schema = {
 
 ## 4. Handling tool use responses
 
-_Pending._
+When Claude decides to use a tool, the response has a special structure you need to handle, and the
+conversation history has to be kept complete.
+
+### `toolChoice`: when Claude uses tools
+
+Set in `toolConfig` next to the tools:
+
+| Value | Behavior |
+|---|---|
+| `{"auto": {}}` | Claude decides whether to use a tool (**default**) |
+| `{"any": {}}` | Claude **must** use a tool, but picks which one |
+| `{"tool": {"name": "..."}}` | Claude must use **that specific tool** (handy for testing) |
+
+```python
+params["toolConfig"] = {"tools": tools, "toolChoice": {"auto": {}}}
+```
+
+### Multi-part assistant message
+
+Instead of a single text block, the assistant message comes with **several content parts**:
+
+| Part | Content |
+|---|---|
+| `text` | A human-readable line, e.g. *"I can help you find out the current time. Let me find that information for you."* |
+| `toolUse` | Structured data: which tool to run and with what arguments |
+
+```python
+{
+    "role": "assistant",
+    "content": [
+        {"text": "I can help you find out the current time..."},
+        {"toolUse": {
+            "toolUseId": "tooluse_abc123",
+            "name": "get_current_datetime",
+            "input": {"date_format": "%H:%M:%S"},
+        }},
+    ],
+}
+```
+
+### The `toolUse` part
+
+| Field | Meaning |
+|---|---|
+| `toolUseId` | Unique ID; you need it when sending back the result |
+| `name` | The exact tool name from your schema |
+| `input` | Dict of arguments to pass to your function |
+
+### Conversation flow with tools
+
+When a tool use request arrives:
+
+1. Extract the tool info from the `toolUse` part.
+2. Run your tool function.
+3. Send back a **`toolResult`** message…
+4. …together with the **full history**: the original user message **and** the assistant's tool use message.
+
+```mermaid
+flowchart LR
+    U["user: question"] --> A["assistant: text + toolUse"] --> R["user: toolResult"] --> F["assistant: final answer"]
+```
+
+### Updated helper functions
+
+They now accept either a plain string or a list of parts:
+
+```python
+def add_user_message(messages, content):
+    if isinstance(content, str):
+        user_message = {"role": "user", "content": [{"text": content}]}
+    else:
+        user_message = {"role": "user", "content": content}
+    messages.append(user_message)
+
+def add_assistant_message(messages, content):
+    if isinstance(content, str):
+        assistant_message = {"role": "assistant", "content": [{"text": content}]}
+    else:
+        assistant_message = {"role": "assistant", "content": content}
+    messages.append(assistant_message)
+```
+
+`chat` takes `tools` and returns the parts, not just the text. Version from the notebook:
+
+```python
+def chat(messages, system=None, temperature=1.0, stop_sequences=[], tools=None):
+    params = {
+        "modelId": model_id,
+        "messages": messages,
+        "inferenceConfig": {"temperature": temperature, "stopSequences": stop_sequences},
+    }
+    if system:
+        params["system"] = [{"text": system}]
+    if tools:
+        params["toolConfig"] = {"tools": tools, "toolChoice": {"auto": {}}}
+
+    response = client.converse(**params)
+    parts = response["output"]["message"]["content"]
+
+    return {
+        "parts": parts,
+        "stop_reason": response["stopReason"],
+        "text": "\n".join(p["text"] for p in parts if "text" in p),
+    }
+```
+
+> The lesson's version returns `content[0]["text"]`, which breaks if the first part is a `toolUse`
+> instead of text. The notebook version joins only the `text` parts, which is safer.
+
+### Check the stop reason
+
+`stopReason == "tool_use"` means Claude wants a tool instead of giving a final answer: extract the
+tool info and run the function.
 
 ## 5. Running tool functions
 
