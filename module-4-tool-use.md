@@ -36,6 +36,11 @@
     - [Error handling](#error-handling)
     - [Complete `run_tools`](#complete-run_tools)
   - [6. Sending tool results](#6-sending-tool-results)
+    - [1 · Add Claude's tool request to the history](#1--add-claudes-tool-request-to-the-history)
+    - [2 · Run the tools and add the results](#2--run-the-tools-and-add-the-results)
+    - [3 · Final call to Claude](#3--final-call-to-claude)
+    - [Full sequence](#full-sequence)
+    - [Result](#result)
   - [7. Multi-Turn conversations with tools](#7-multi-turn-conversations-with-tools)
   - [8. Adding multiple tools](#8-adding-multiple-tools)
   - [9. Batch tool use](#9-batch-tool-use)
@@ -356,6 +361,8 @@ Write the code defensively so it handles all of them.
 
 ### Extracting the `toolUse` parts
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/663ec743-260f-4cac-991f-4a2a1903d41b" />
+
 ```python
 tool_requests = [part for part in parts if "toolUse" in part]   # ignores text parts
 ```
@@ -439,7 +446,69 @@ The returned list is what you send back to Claude in the next request → [Sendi
 
 ## 6. Sending tool results
 
-_Pending._
+The last step of the cycle: package the tool results into a **user message** and send the **whole
+conversation** back to Claude, **with the tool schemas**, so it can write the final answer.
+
+### 1 · Add Claude's tool request to the history
+
+Store the assistant message that contains the `toolUse` parts:
+
+```python
+add_assistant_message(messages, parts)
+```
+
+### 2 · Run the tools and add the results
+
+`run_tools()` ([previous section](#5-running-tool-functions)) returns one `toolResult` per request,
+each with the matching `toolUseId`, the output and a `success`/`error` status. They go in a **user**
+message:
+
+```python
+add_user_message(messages, run_tools(parts))
+```
+
+### 3 · Final call to Claude
+
+It needs two things:
+
+- The **complete history**: user → assistant (`toolUse`) → user (`toolResult`).
+- The **same tool schemas** as before.
+
+```python
+text, parts = chat(messages, tools=[get_current_datetime_schema])
+```
+
+> Always send the schemas again: without them Claude doesn't know what `get_current_datetime` is
+> when it finds it in the history.
+
+With the notebook version of `chat`, which returns a dict:
+
+```python
+result = chat(messages, tools=[get_current_datetime_schema])
+print(result["text"])
+```
+
+### Full sequence
+
+```mermaid
+sequenceDiagram
+    participant S as Your code
+    participant C as Claude
+    S->>C: user: "What time is it?" + tool schemas
+    C-->>S: assistant: text + toolUse (get_current_datetime)
+    Note over S: add_assistant_message(messages, parts)
+    Note over S: add_user_message(messages, run_tools(parts))
+    S->>C: full history + tool schemas
+    C-->>S: "The current date and time is 2025-04-03, 12:54:00."
+```
+
+### Result
+
+Claude answers *"The current date and time is 2025-04-03, 12:54:00."* It may know the date, but not
+the exact time: the tool gave it the real-time data it was missing.
+
+The whole cycle now works: Claude asks for a tool → your code runs it → you return the result →
+Claude uses it in the final answer.
 
 ## 7. Multi-Turn conversations with tools
 
