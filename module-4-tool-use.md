@@ -42,6 +42,11 @@
     - [Full sequence](#full-sequence)
     - [Result](#result)
   - [7. Multi-Turn conversations with tools](#7-multi-turn-conversations-with-tools)
+    - [The problem](#the-problem)
+    - [Stop reasons](#stop-reasons)
+    - [`chat` returns a dict](#chat-returns-a-dict)
+    - [The conversation loop](#the-conversation-loop)
+    - [Testing it](#testing-it)
   - [8. Adding multiple tools](#8-adding-multiple-tools)
   - [9. Batch tool use](#9-batch-tool-use)
   - [10. Structured data with tools](#10-structured-data-with-tools)
@@ -512,7 +517,90 @@ Claude uses it in the final answer.
 
 ## 7. Multi-Turn conversations with tools
 
-_Pending._
+Claude might ask for a tool **or** answer directly. The code has to handle both.
+
+### The problem
+
+If the code always processes tool results, a simple question like *"What is 1+1?"* (no tool needed)
+ends up adding **empty messages** to the history. The fix: check the **`stopReason`** of every response.
+
+### Stop reasons
+
+| `stopReason` | Meaning |
+|---|---|
+| `tool_use` | Claude wants to call a tool |
+| `end_turn` | Claude finished its answer |
+| `max_tokens` | Hit the output limit |
+| `stop_sequence` | Hit one of your stop sequences |
+
+### `chat` returns a dict
+
+```python
+def chat(messages, tools=None, system=None, **kwargs):
+    # ... existing code ...
+    return {
+        "parts": parts,
+        "stop_reason": response["stopReason"],
+        "text": "\n".join([p["text"] for p in parts if "text" in p]),
+    }
+```
+
+Joining every text part is more robust than assuming the first part is text.
+
+### The conversation loop
+
+```python
+def run_conversation(messages):
+    while True:
+        result = chat(messages, tools=[get_current_datetime_schema])
+
+        add_assistant_message(messages, result["parts"])
+        print(result["text"])
+
+        if result["stop_reason"] != "tool_use":
+            break
+
+        tool_result_parts = run_tools(result["parts"])
+        add_user_message(messages, tool_result_parts)
+
+    return messages
+```
+
+Each iteration:
+
+1. Sends the messages to Claude.
+2. Adds Claude's response to the history.
+3. Checks whether it wants a tool.
+4. Yes → runs the tools and adds the results as a user message, then loops.
+5. No → exits.
+
+```mermaid
+flowchart TD
+    A["chat(messages, tools)"] --> B["add_assistant_message"]
+    B --> C{"stop_reason == tool_use?"}
+    C -- yes --> D["run_tools → add_user_message"] --> A
+    C -- no --> E["return messages"]
+```
+
+### Testing it
+
+```python
+# Needs a tool
+messages = []
+add_user_message(messages, "What time is it?")
+run_conversation(messages)
+
+# No tool needed
+messages = []
+add_user_message(messages, "What is 1+1?")
+run_conversation(messages)
+```
+
+The time question uses the datetime tool; the math question gets a direct answer. The loop adapts on
+its own, and the same pattern works unchanged as you add more tools.
+
+> ⚠️ In real code, add a **maximum number of iterations** so a model that keeps asking for tools can't
+> loop forever.
 
 ## 8. Adding multiple tools
 
