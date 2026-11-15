@@ -28,6 +28,13 @@
     - [Updated helper functions](#updated-helper-functions)
     - [Check the stop reason](#check-the-stop-reason)
   - [5. Running tool functions](#5-running-tool-functions)
+    - [Handle several tool requests](#handle-several-tool-requests)
+    - [Extracting the `toolUse` parts](#extracting-the-tooluse-parts)
+    - [Running the right tool](#running-the-right-tool)
+    - [`toolResult` parts](#toolresult-parts)
+    - [Why the IDs matter](#why-the-ids-matter)
+    - [Error handling](#error-handling)
+    - [Complete `run_tools`](#complete-run_tools)
   - [6. Sending tool results](#6-sending-tool-results)
   - [7. Multi-Turn conversations with tools](#7-multi-turn-conversations-with-tools)
   - [8. Adding multiple tools](#8-adding-multiple-tools)
@@ -339,7 +346,96 @@ tool info and run the function.
 
 ## 5. Running tool functions
 
-_Pending._
+When Claude replies with a tool use request, your server has to **extract the `toolUse` parts, run
+the matching functions and format the results** as `toolResult` parts.
+
+### Handle several tool requests
+
+One assistant message can contain a text part followed by **one, two or more** `toolUse` parts.
+Write the code defensively so it handles all of them.
+
+### Extracting the `toolUse` parts
+
+```python
+tool_requests = [part for part in parts if "toolUse" in part]   # ignores text parts
+```
+
+Each one gives you `toolUseId`, `name` and `input`.
+
+### Running the right tool
+
+```python
+def run_tool(tool_name, tool_input):
+    if tool_name == "get_current_datetime":
+        return get_current_datetime(**tool_input)
+    else:
+        raise Exception(f"Unknown tool name: {tool_name}")
+```
+
+Claude always sends the arguments as a **dict**, so unpack them with `**tool_input`.
+
+### `toolResult` parts
+
+| Field | Value |
+|---|---|
+| `toolUseId` | Must **match** the ID of the original `toolUse` part |
+| `content` | The tool's output, serialized as a string (`[{"text": json.dumps(output)}]`) |
+| `status` | `"success"` or `"error"` |
+
+### Why the IDs matter
+
+If Claude asks for the same tool twice in one message (e.g. a calculator with IDs `ab3` and `po9`),
+each result must carry the matching ID so Claude knows which result belongs to which request.
+
+```mermaid
+flowchart LR
+    A["toolUse ab3"] --> RA["toolResult ab3"]
+    B["toolUse po9"] --> RB["toolResult po9"]
+```
+
+### Error handling
+
+Wrap each call in `try/except`. If you return the error as a result, Claude can **adjust its approach**
+(e.g. retry with different arguments) instead of the whole flow crashing.
+
+### Complete `run_tools`
+
+```python
+import json
+
+def run_tools(parts):
+    tool_requests = [part for part in parts if "toolUse" in part]
+    tool_result_parts = []
+
+    for tool_request in tool_requests:
+        tool_use_id = tool_request["toolUse"]["toolUseId"]
+        tool_name = tool_request["toolUse"]["name"]
+        tool_input = tool_request["toolUse"]["input"]
+
+        try:
+            tool_output = run_tool(tool_name, tool_input)
+            tool_result_part = {
+                "toolResult": {
+                    "toolUseId": tool_use_id,
+                    "content": [{"text": json.dumps(tool_output)}],
+                    "status": "success",
+                }
+            }
+        except Exception as e:
+            tool_result_part = {
+                "toolResult": {
+                    "toolUseId": tool_use_id,
+                    "content": [{"text": f"Error: {e}"}],
+                    "status": "error",
+                }
+            }
+
+        tool_result_parts.append(tool_result_part)
+
+    return tool_result_parts
+```
+
+The returned list is what you send back to Claude in the next request → [Sending tool results](#6-sending-tool-results).
 
 ## 6. Sending tool results
 
