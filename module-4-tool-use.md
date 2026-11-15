@@ -9,6 +9,12 @@
     - [Weather example](#weather-example)
     - [Why it feels confusing at first](#why-it-feels-confusing-at-first)
   - [2. Tool functions](#2-tool-functions)
+    - [Why it's hard for Claude alone](#why-its-hard-for-claude-alone)
+    - [The three tools](#the-three-tools)
+    - [Where tool functions fit](#where-tool-functions-fit)
+    - [Writing tool functions](#writing-tool-functions)
+    - [First tool: current date and time](#first-tool-current-date-and-time)
+    - [JSON Schema spec (preview)](#json-schema-spec-preview)
   - [3. JSON Schema for tools](#3-json-schema-for-tools)
   - [4. Handling tool use responses](#4-handling-tool-use-responses)
   - [5. Running tool functions](#5-running-tool-functions)
@@ -71,7 +77,60 @@ The code isn't written in the same order the flow runs. Typically you:
 
 ## 2. Tool functions
 
-_Pending._
+Running example for the module: letting Claude **set reminders for future dates**.
+
+### Why it's hard for Claude alone
+
+- It may know today's date, but **not the exact time**.
+- It doesn't always do **date arithmetic** well, especially many days ahead.
+- It has **no way to actually set a reminder**.
+
+### The three tools
+
+| Tool | Why |
+|---|---|
+| `get_current_datetime` | Claude needs the current date and time |
+| `add_duration_to_datetime` | Claude isn't reliable at date/time addition |
+| `set_reminder` | Claude has no way to set a reminder |
+
+### Where tool functions fit
+
+Write the function → write its JSON Schema → call Claude with the schema → run the tool when Claude
+asks for it → send the result back to Claude.
+
+### Writing tool functions
+
+A tool function is a **plain Python function** that runs when Claude decides it needs extra
+information. Best practices:
+
+- **Well-named, descriptive arguments** (it matters later, for the schema).
+- **Validate the inputs** and raise an error if they're invalid.
+- **Return meaningful errors**: if a call fails, Claude will try again, so the error message should help it fix the call.
+
+### First tool: current date and time
+
+```python
+from datetime import datetime, timedelta
+
+def get_current_datetime(date_format="%Y-%m-%d %H:%M:%S"):
+    return datetime.now().strftime(date_format)
+```
+
+Descriptive name, a well-named parameter with a sensible default, and it returns exactly what it promises.
+
+### JSON Schema spec (preview)
+
+Each function also needs a **JSON Schema** describing it to Claude: what arguments it takes, and when and
+how to use it. JSON Schema isn't an LLM-only concept (it's widely used for data validation) and there
+are online tools to generate schemas.
+
+- Explain **what the tool does, when to use it and what it returns**.
+- Aim for **3–4 sentences** in the description.
+- Give **detailed descriptions for each parameter**.
+
+More in [JSON Schema for tools](#3-json-schema-for-tools).
+
+📓 [001_tools.ipynb](exercises/module_4/001_tools.ipynb) · 📓 [002_tools_complete.ipynb](exercises/module_4/002_tools_complete.ipynb)
 
 ## 3. JSON Schema for tools
 
