@@ -48,6 +48,10 @@
     - [The conversation loop](#the-conversation-loop)
     - [Testing it](#testing-it)
   - [8. Adding multiple tools](#8-adding-multiple-tools)
+    - [The new functions](#the-new-functions)
+    - [Step 1 · Add the schemas to the request](#step-1--add-the-schemas-to-the-request)
+    - [Step 2 · Route the new names in `run_tool`](#step-2--route-the-new-names-in-run_tool)
+    - [Testing a multi-step request](#testing-a-multi-step-request)
   - [9. Batch tool use](#9-batch-tool-use)
   - [10. Structured data with tools](#10-structured-data-with-tools)
   - [11. Flexible tool extraction](#11-flexible-tool-extraction)
@@ -604,7 +608,58 @@ its own, and the same pattern works unchanged as you add more tools.
 
 ## 8. Adding multiple tools
 
-_Pending._
+With the base in place, adding the other two tools of the reminder project is quick.
+
+### The new functions
+
+Already provided in the notebook, each with its JSON schema:
+
+| Function | What it does |
+|---|---|
+| `add_duration_to_datetime` | Date arithmetic in several units (seconds … years) |
+| `set_reminder` | Creates the reminder (for now it only prints it; could call a real reminder system) |
+
+### Step 1 · Add the schemas to the request
+
+In `run_conversation`:
+
+```python
+tools=[
+    get_current_datetime_schema,
+    add_duration_to_datetime_schema,
+    set_reminder_schema,
+]
+```
+
+### Step 2 · Route the new names in `run_tool`
+
+```python
+def run_tool(tool_name, tool_input):
+    if tool_name == "get_current_datetime":
+        return get_current_datetime(**tool_input)
+    elif tool_name == "set_reminder":
+        return set_reminder(**tool_input)
+    elif tool_name == "add_duration_to_datetime":
+        return add_duration_to_datetime(**tool_input)
+    else:
+        raise Exception(f"Unknown tool name: {tool_name}")
+```
+
+### Testing a multi-step request
+
+*"Set a reminder to go to the doctor. The appointment is in 100 days."*
+
+Claude splits it into steps, explains its plan and calls the tools one after another:
+
+```mermaid
+flowchart LR
+    A["get_current_datetime<br/>today's date"] --> B["add_duration_to_datetime<br/>+100 days"] --> C["set_reminder<br/>doctor appointment"]
+```
+
+The output shows the whole workflow: the calculated date and the confirmation that the reminder was set.
+
+> Adding a tool = **2 steps**: put its schema in the `tools` list and add a branch in `run_tool`.
+> The first setup feels heavy, but scaling to more tools is easy.
 
 ## 9. Batch tool use
 
