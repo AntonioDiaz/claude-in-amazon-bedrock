@@ -16,6 +16,10 @@
     - [First tool: current date and time](#first-tool-current-date-and-time)
     - [JSON Schema spec (preview)](#json-schema-spec-preview)
   - [3. JSON Schema for tools](#3-json-schema-for-tools)
+    - [Two parts](#two-parts)
+    - [Creating a schema in 4 steps](#creating-a-schema-in-4-steps)
+    - [Writing good descriptions](#writing-good-descriptions)
+    - [Final shape (Converse `toolSpec`)](#final-shape-converse-toolspec)
   - [4. Handling tool use responses](#4-handling-tool-use-responses)
   - [5. Running tool functions](#5-running-tool-functions)
   - [6. Sending tool results](#6-sending-tool-results)
@@ -134,7 +138,82 @@ More in [JSON Schema for tools](#3-json-schema-for-tools).
 
 ## 3. JSON Schema for tools
 
-_Pending._
+Each tool function needs a **JSON Schema** that tells Claude what arguments it expects and how to use
+it. It looks intimidating at first, but it's mechanical once you know the steps.
+
+### Two parts
+
+JSON Schema is a long-standing standard for **data validation**, not something made up for AI. A tool
+spec has:
+
+| Part | Purpose |
+|---|---|
+| `name` + `description` (top) | Help Claude decide **when** to use the tool |
+| `inputSchema` (bottom) | Describes the function's **arguments** in detail |
+
+### Creating a schema in 4 steps
+
+1. **Dictionary with sample data** — one key per keyword argument of the function, with realistic values.
+
+   ```python
+   def process_data(ids, profile, primary_id, value):
+       pass
+
+   sample = {
+       "ids": [1, 2, 3],
+       "profile": {"name": "Ana", "active": True},
+       "primary_id": 1,
+       "value": 9.5,
+   }
+   ```
+
+2. **Convert it to JSON** — mainly Python `True`/`False`/`None` → JSON `true`/`false`/`null`.
+3. **Online converter** — search *"JSON to JSON Schema converter"*, paste the JSON, get the schema. Remove the `$schema` line, it isn't needed.
+4. **Add descriptions** — the most important step: a detailed description for each property.
+
+### Writing good descriptions
+
+- Explain **what the tool does, when to use it and what it returns**.
+- Aim for **3–4 sentences** in the tool description.
+- Write **very detailed descriptions for each property** (formats, valid values, examples).
+- Stuck? Paste the function into Claude and ask it to write the descriptions.
+
+### Final shape (Converse `toolSpec`)
+
+From [002_tools_complete.ipynb](exercises/module_4/002_tools_complete.ipynb):
+
+```python
+get_current_datetime_schema = {
+    "toolSpec": {
+        "name": "get_current_datetime",
+        "description": (
+            "Retrieves the current date and time formatted according to the specified format string. "
+            "This tool returns the system's current local date and time as a formatted string. "
+            "It should be used when the user needs to know the current date, time, or both in a specific format. "
+            "..."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "date_format": {
+                        "type": "string",
+                        "description": (
+                            "A string that specifies the format of the returned date and time, using Python's "
+                            "strftime format codes. For example, '%Y-%m-%d' returns only the date as '2025-04-02' ..."
+                        ),
+                    }
+                },
+            }
+        },
+    }
+}
+```
+
+`toolSpec` → `name` · `description` · `inputSchema` → `json` → the actual JSON Schema.
+
+> The schema is a **contract** between your code and Claude: when Claude uses the tool, it knows exactly
+> what to send and in what format. That's what makes tool use reliable.
 
 ## 4. Handling tool use responses
 
