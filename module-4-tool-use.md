@@ -53,6 +53,12 @@
     - [Step 2 · Route the new names in `run_tool`](#step-2--route-the-new-names-in-run_tool)
     - [Testing a multi-step request](#testing-a-multi-step-request)
   - [9. Batch tool use](#9-batch-tool-use)
+    - [The problem](#the-problem-1)
+    - [The idea](#the-idea)
+    - [Schema (Converse format)](#schema-converse-format)
+    - [`run_batch`](#run_batch)
+    - [Routing it in `run_tool`](#routing-it-in-run_tool)
+    - [Result](#result-1)
   - [10. Structured data with tools](#10-structured-data-with-tools)
   - [11. Flexible tool extraction](#11-flexible-tool-extraction)
   - [12. The text editor tool](#12-the-text-editor-tool)
@@ -663,7 +669,101 @@ The output shows the whole workflow: the calculated date and the confirmation th
 
 ## 9. Batch tool use
 
-_Pending._
+Claude can return **several `toolUse` parts in one message**, but it doesn't always take advantage of
+it. A **batch tool** makes it much more likely that independent calls go together in a single message.
+
+### The problem
+
+*"What is March 12th, 2025 + 50 days? Also, what is March 12th, 2025 + 100 days?"*
+
+The two calculations are independent, so they could go in parallel. But Claude often makes them **one
+after another**: two round trips instead of one.
+
+### The idea
+
+The batch tool is a normal tool (schema + function) whose job is to **invoke several other tools at
+once**. Its input is a list of `invocations`, each with a tool `name` and its `arguments` as a **JSON string**.
+
+### Schema (Converse format)
+
+```python
+batch_tool_schema = {
+    "toolSpec": {
+        "name": "batch_tool",
+        "description": "Invoke multiple other tool calls simultaneously",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "invocations": {
+                        "type": "array",
+                        "description": "The tool calls to invoke",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "The name of the tool to invoke",
+                                },
+                                "arguments": {
+                                    "type": "string",
+                                    "description": "The arguments to the tool, encoded as a JSON string",
+                                },
+                            },
+                            "required": ["name", "arguments"],
+                        },
+                    }
+                },
+                "required": ["invocations"],
+            }
+        },
+    }
+}
+```
+
+> The lesson shows it in Anthropic API format (`input_schema`); on Bedrock it goes inside
+> `toolSpec` → `inputSchema` → `json`. The notebook has a typo in `items`: `"types"` instead of
+> `"type"`, which should be fixed.
+
+### `run_batch`
+
+```python
+def run_batch(tool_input):
+    batch_output = []
+    for invocation in tool_input["invocations"]:
+        tool_name = invocation["name"]
+        args = json.loads(invocation["arguments"])   # arguments arrive as a JSON string
+
+        tool_output = run_tool(tool_name, args)
+        batch_output.append({"tool_name": tool_name, "output": tool_output})
+
+    return batch_output
+```
+
+Loops over the invocations, reuses the existing `run_tool` for each one and collects all results.
+
+### Routing it in `run_tool`
+
+```python
+elif tool_name == "batch_tool":
+    return run_batch(tool_input)     # no ** here: run_batch needs the raw input
+```
+
+And add `batch_tool_schema` to the `tools` list.
+
+### Result
+
+Instead of two separate tool calls you get **one `batch_tool` call** with both date calculations as
+sub-invocations.
+
+```mermaid
+flowchart LR
+    B["batch_tool"] --> I1["add_duration_to_datetime<br/>+50 days"]
+    B --> I2["add_duration_to_datetime<br/>+100 days"]
+```
+
+> Useful whenever there are several **independent** operations: fewer round trips with Claude.
+> `run_batch` runs them one by one; to truly run them in parallel you could use a thread pool.
 
 ## 10. Structured data with tools
 
