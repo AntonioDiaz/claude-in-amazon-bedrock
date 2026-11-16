@@ -25,7 +25,7 @@ prompt caching, the Model Context Protocol (MCP), and agents with Claude Code an
 2. [Prompt evaluations](module-2-prompt-evaluations.md)
 3. [Prompt engineering](module-3-prompt-engineering.md)
 4. [Tool use (function calling)](module-4-tool-use.md)
-5. Retrieval Augmented Generation (RAG)
+5. [Retrieval Augmented Generation (RAG)](module-5-rag.md)
 6. Features of Claude
 7. Model Context Protocol (MCP)
 8. Agents
