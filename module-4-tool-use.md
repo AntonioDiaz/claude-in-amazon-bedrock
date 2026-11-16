@@ -60,6 +60,10 @@
     - [Routing it in `run_tool`](#routing-it-in-run_tool)
     - [Result](#result-1)
   - [10. Structured data with tools](#10-structured-data-with-tools)
+    - [How it works](#how-it-works)
+    - [Forcing the tool](#forcing-the-tool)
+    - [Example: article details](#example-article-details)
+    - [Benefits and trade-off](#benefits-and-trade-off)
   - [11. Flexible tool extraction](#11-flexible-tool-extraction)
   - [12. The text editor tool](#12-the-text-editor-tool)
   - [Common pitfalls](#common-pitfalls)
@@ -767,7 +771,111 @@ flowchart LR
 
 ## 10. Structured data with tools
 
-_Pending._
+[Module 1](module-1-working-with-the-api.md#10-structured-data) got JSON with **prefill + stop
+sequences**: quick to set up. Tools give **more reliable** structured output, at the cost of more setup.
+Knowing both lets you pick: the quick prompt-based way, or the robust tool-based way.
+
+### How it works
+
+Instead of asking Claude to *write* JSON, you define a tool whose **input schema is exactly the data
+structure you want**. Claude "calls" the tool, and the call's arguments are your data.
+
+1. Write a JSON schema for the data you want.
+2. Create a tool with that schema as its `inputSchema`.
+3. Send the data and the tool schema to Claude.
+4. **Force** Claude to use that tool with `toolChoice`.
+5. Take the structured data from the `toolUse` → `input`.
+
+```mermaid
+sequenceDiagram
+    participant S as Your code
+    participant C as Claude
+    S->>C: "Analyze this article and call article_details" + schema (forced)
+    C-->>S: toolUse: article_details {title, author, topics}
+    Note over S: take toolUse["input"] → done, no toolResult needed
+```
+
+Once you have the data, the conversation **ends**: no tool to run, no `toolResult` to send back.
+
+### Forcing the tool
+
+| `toolChoice` | Behavior |
+|---|---|
+| `{"auto": {}}` | Claude decides whether to use a tool (default) |
+| `{"any": {}}` | Must use a tool, picks which |
+| `{"tool": {"name": "article_details"}}` | **Must use this tool** → the one to use for structured output |
+
+### Example: article details
+
+Schema:
+
+```python
+article_details_schema = {
+    "toolSpec": {
+        "name": "article_details",
+        "description": "Extracts key information from an article",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "The title of the article"},
+                    "author": {"type": "string", "description": "The author's name"},
+                    "topics": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of key topics mentioned",
+                    },
+                },
+                "required": ["title", "author", "topics"],
+            }
+        },
+    }
+}
+```
+
+`chat` gets a `tool_choice` parameter (from the notebook):
+
+```python
+def chat(messages, system=None, temperature=1.0, stop_sequences=[], tools=None, tool_choice="auto"):
+    # ... params as before ...
+    tool_choices = {"auto": {"auto": {}}, "any": {"any": {}}}
+    if tools:
+        choice = tool_choices.get(tool_choice, {"tool": {"name": tool_choice}})
+        params["toolConfig"] = {"tools": tools, "toolChoice": choice}
+    # ... converse + return dict ...
+```
+
+Call, forcing the tool:
+
+```python
+messages = []
+add_user_message(messages, f"""
+Analyze the article below and extract key data. Then call the article_details tool.
+
+<article_text>
+{article_text}
+</article_text>
+""")
+
+result = chat(messages, tools=[article_details_schema], tool_choice="article_details")
+
+data = next(p["toolUse"]["input"] for p in result["parts"] if "toolUse" in p)
+# → {"title": "...", "author": "...", "topics": [...]}
+```
+
+### Benefits and trade-off
+
+| ✅ Benefits | ⚠️ Trade-off |
+|---|---|
+| More reliable than prompt-based extraction | More complex: detailed schemas, handling `toolUse` parts |
+| Output follows your schema | |
+| No prefill or stop sequences needed | |
+| The schema acts as built-in validation | |
+
+> For quick, simple extraction, prefill + stop sequences is enough. When the output must be
+> consistent and reliable, use a tool.
+
+📓 [003_structured_data.ipynb](exercises/module_4/003_structured_data.ipynb) · 📓 [004_structured_data_complete.ipynb](exercises/module_4/004_structured_data_complete.ipynb)
 
 ## 11. Flexible tool extraction
 
