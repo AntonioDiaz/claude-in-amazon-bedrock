@@ -65,6 +65,11 @@
     - [Example: article details](#example-article-details)
     - [Benefits and trade-off](#benefits-and-trade-off)
   - [11. Flexible tool extraction](#11-flexible-tool-extraction)
+    - [The flexible schema](#the-flexible-schema)
+    - [How it works](#how-it-works-1)
+    - [The prompt](#the-prompt)
+    - [Changing the structure is trivial](#changing-the-structure-is-trivial)
+    - [Dedicated schema vs flexible `to_json`](#dedicated-schema-vs-flexible-to_json)
   - [12. The text editor tool](#12-the-text-editor-tool)
   - [Common pitfalls](#common-pitfalls)
 
@@ -879,7 +884,77 @@ data = next(p["toolUse"]["input"] for p in result["parts"] if "toolUse" in p)
 
 ## 11. Flexible tool extraction
 
-_Pending._
+Writing a detailed JSON schema for every extraction task is tedious. Workaround: **one generic
+`to_json` tool** that accepts any object, and you describe the structure you want **in the prompt**.
+
+### The flexible schema
+
+`additionalProperties: True` lets Claude pass any fields:
+
+```python
+to_json_schema = {
+    "toolSpec": {
+        "name": "to_json",
+        "description": (
+            "This tool processes any JSON data and can be used for generating structured content, "
+            "transforming information, or creating any JSON-based output needed for your task."
+        ),
+        "inputSchema": {
+            "json": {"type": "object", "additionalProperties": True}
+        },
+    }
+}
+```
+
+### How it works
+
+1. One flexible schema that accepts any object.
+2. In the prompt, describe **exactly** the structure you want.
+3. Tell Claude to call `to_json` with that structure.
+4. Force the tool with `tool_choice`.
+
+### The prompt
+
+```python
+add_user_message(messages, f"""
+Analyze the article below and extract key data. Then call the to_json tool.
+
+<article_text>
+{result["text"]}
+</article_text>
+
+When you call to_json, pass in the following structure:
+{{
+    "title": str # title of the article,
+    "author": str # author of the article,
+    "topics": List[str] # List of topics mentioned in the article
+}}
+""")
+
+flexible_result = chat(messages, tools=[to_json_schema], tool_choice="to_json")
+```
+
+> `{{` and `}}` are needed because it's an f-string: they produce literal braces.
+
+### Changing the structure is trivial
+
+Need the number of topics? Add one line to the prompt, no schema changes:
+
+```text
+"num_topics": int # Number of topics mentioned
+```
+
+### Dedicated schema vs flexible `to_json`
+
+| | Flexible `to_json` | Dedicated schema ([section 10](#10-structured-data-with-tools)) |
+|---|---|---|
+| Setup | Minimal: structure lives in the prompt | A detailed schema per task |
+| Quality | Very good (~90%) | Best |
+| Best for | Prototyping · simple extractions · requirements that change often | Critical production extraction · complex nested structures · highest accuracy |
+
+> About **90% of the quality with 10% of the setup**: good enough for most structured extraction.
+
+📓 [004_structured_data_complete.ipynb](exercises/module_4/004_structured_data_complete.ipynb)
 
 ## 12. The text editor tool
 
