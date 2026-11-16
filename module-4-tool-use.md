@@ -71,6 +71,12 @@
     - [Changing the structure is trivial](#changing-the-structure-is-trivial)
     - [Dedicated schema vs flexible `to_json`](#dedicated-schema-vs-flexible-to_json)
   - [12. The text editor tool](#12-the-text-editor-tool)
+    - [What it can do](#what-it-can-do)
+    - [Custom tool vs text editor tool](#custom-tool-vs-text-editor-tool)
+    - [Setting it up](#setting-it-up)
+    - [Commands](#commands)
+    - [Example: analyzing a file](#example-analyzing-a-file)
+    - [Practical uses](#practical-uses)
   - [Common pitfalls](#common-pitfalls)
 
 ---
@@ -958,7 +964,137 @@ Need the number of topics? Add one line to the prompt, no schema changes:
 
 ## 12. The text editor tool
 
-_Pending._
+> ⚠️ Tool IDs change with each model version. Check the current ones in the
+> [AWS docs › Anthropic-defined tools](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html#model-parameters-anthropic-anthropic-defined-tools).
+
+A **built-in Claude tool** that gives it file system access and text editing. Claude already knows how
+to ask for text editor operations: **you only implement the handling**.
+
+### What it can do
+
+Work with files and folders like a software engineer:
+
+- View a file or directory
+- View a range of lines in a file
+- Replace text in a file
+- Create new files
+- Insert text at a given line
+- Undo recent edits
+
+### Custom tool vs text editor tool
+
+| | Custom tool | Text editor tool |
+|---|---|---|
+| JSON schema | **You** write it | **Built into Claude** |
+| Implementation | You write it | **You still write it** |
+
+### Setting it up
+
+You pass a **versioned tool type** instead of a schema; it depends on the model:
+
+```python
+text_editor = "text_editor_20250124"   # Claude 3.7
+text_editor = "text_editor_20241022"   # Claude 3.5
+```
+
+Newer models use other versions (see the AWS docs above).
+
+#### How it's passed on Bedrock (from the notebook)
+
+Converse has no field for Anthropic-defined tools, so the text editor goes in
+**`additionalModelRequestFields`**, with the name `str_replace_editor`:
+
+```python
+def chat(messages, ..., tools=None, tool_choice="auto", text_editor=None):
+    # ... params as before ...
+    if tools or text_editor:
+        choice = tool_choices.get(tool_choice, {"tool": {"name": tool_choice}})
+        params["toolConfig"] = {"tools": tools, "toolChoice": choice}
+
+    if text_editor:
+        params["additionalModelRequestFields"] = {
+            "tools": [{"type": text_editor, "name": "str_replace_editor"}]
+        }
+    # ... converse + return dict ...
+```
+
+**AWS workaround:** `toolUse` parts only come back if `toolConfig` has **at least one** tool schema.
+The notebook adds a dummy `forbidden_tool` whose description says never to call it:
+
+```python
+forbidden_tool_schema = {
+    "toolSpec": {
+        "name": "forbidden_tool",
+        "description": "This tool is deprecated and should not be called under any circumstances. ...",
+        "inputSchema": {"json": {"type": "object", "properties": {
+            "parameter": {"type": "string", "description": "This parameter is no longer supported. ..."}
+        }}},
+    }
+}
+
+result = chat(messages, text_editor=text_editor, tools=[forbidden_tool_schema])
+```
+
+### Commands
+
+Claude sends `toolUse` requests with a `command` field; your code must handle all of them:
+
+| `command` | Action | Main inputs |
+|---|---|---|
+| `view` | Show a file (or line range) / list a directory | `path` (+ `view_range`) |
+| `str_replace` | Replace text in a file | `path`, `old_str`, `new_str` |
+| `create` | Create a new file | `path`, `file_text` |
+| `insert` | Insert text after a line | `path`, `insert_line`, `new_str` |
+| `undo_edit` | Undo the last edit | `path` |
+
+```python
+def run_tool(tool_name, tool_input):
+    if tool_name == "str_replace_editor":
+        command = tool_input.get("command", "")
+        if command == "view":
+            path = tool_input.get("path", "")
+            return text_editor_tool.view(path)
+        elif command == "str_replace":
+            path = tool_input.get("path", "")
+            old_str = tool_input.get("old_str", "")
+            new_str = tool_input.get("new_str", "")
+            return text_editor_tool.str_replace(path, old_str, new_str)
+        # ... create, insert, undo_edit → same pattern
+```
+
+The notebook handles all five, plus `view_range` for `view`.
+
+### Example: analyzing a file
+
+*"Write a one sentence description of the code in the ./main.py file"*
+
+<img width="1920" height="1080" alt="Text editor tool flow: Claude requests view of ./main.py, the server reads it and returns the contents" src="https://github.com/user-attachments/assets/a55f42f1-0d8e-4263-b964-aed62d19f081" />
+
+1. Claude sends a `toolUse` with `{"command": "view", "path": "./main.py"}`.
+2. Your server reads the file with the `TextEditorTool` class and returns the contents.
+3. Claude writes its description based on the code it read.
+
+### Practical uses
+
+It turns Claude into a **code assistant** that can:
+
+- Read existing code and analyze it
+- Create new files and functions
+- Modify existing code
+- Set up test files
+- Refactor across several files
+
+Example: *"Write a function to calculate pi to the 5th digit in main.py, then create a test.py file to
+test it."* Claude reads `main.py`, adds the function, creates `test.py` and writes the tests, all through
+text editor commands.
+
+> This is the basis for AI-powered dev tools like modern editors with built-in AI: you ask for a change
+> and it's applied directly to the files.
+
+> ⚠️ Your implementation touches the real file system: restrict it to a working folder and validate
+> paths.
+
+📓 [005_text_editor_tool.ipynb](exercises/module_4/005_text_editor_tool.ipynb)
 
 ---
 
