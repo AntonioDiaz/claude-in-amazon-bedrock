@@ -15,6 +15,9 @@
   - [Implementations](#implementations)
   - [Choosing a strategy](#choosing-a-strategy)
 - [3. Text embeddings](#3-text-embeddings)
+  - [What an embedding is](#what-an-embedding-is)
+  - [Why it matters for RAG](#why-it-matters-for-rag)
+  - [Generating embeddings on Bedrock](#generating-embeddings-on-bedrock)
 - [4. The full RAG flow](#4-the-full-rag-flow)
 - [5. Implementing the RAG flow](#5-implementing-the-rag-flow)
 - [6. BM25 lexical search](#6-bm25-lexical-search)
@@ -212,7 +215,84 @@ based on the quality of what retrieval returns.
 
 ## 3. Text embeddings
 
-_Pending._
+With the document chunked, the next problem is **search**: given the user's question, which chunks are
+related to it? Plain keyword matching isn't enough (remember the "bug" example), so the usual answer is
+**semantic search**, built on **text embeddings**.
+
+### What an embedding is
+
+An **embedding** is a list of numbers that represents the *meaning* of a piece of text, so that a
+computer can compare texts with math instead of words.
+
+```mermaid
+flowchart LR
+    T[Text chunk] --> M[Embedding model]
+    M --> V[Vector of 1024 numbers]
+```
+
+- The model returns a fixed-length vector (1024 numbers in this course).
+- Each number can be thought of as a **score for some quality** of the text: "how happy is it?", "how
+  much does it talk about oceans?"…
+- In practice nobody knows what each position means: the model learns those features in training and
+  they're **not human-interpretable**. The "score" idea is only a mental model.
+
+> The lesson says the values range from -1 to +1. That holds for **normalized** vectors (length 1, as
+> with `normalize=True` below); without normalization the values aren't bounded that way.
+
+### Why it matters for RAG
+
+**Similar meaning → similar vectors.** So you can embed the question, embed every chunk, and compare
+them numerically to find the closest chunks, even when they don't share any words with the question.
+That's what makes semantic search better than keyword matching for picking RAG context.
+
+| | Keyword matching | Semantic search (embeddings) |
+|---|---|---|
+| Compares | Exact words | Meaning |
+| "bug" in a medical vs software text | Same match | Different vectors |
+| Synonyms / paraphrases | Missed | Found |
+
+### Generating embeddings on Bedrock
+
+Embedding models are called with **`InvokeModel`**, not `Converse` (Converse is for chat models). The
+request and response body are model-specific; for **Amazon Titan Text Embeddings V2**:
+
+```python
+import json
+import boto3
+
+client = boto3.client("bedrock-runtime", region_name="us-west-2")
+
+def generate_embedding(
+    text,
+    embedding_model_id="amazon.titan-embed-text-v2:0",
+    dimensions=1024,
+    normalize=True,
+):
+    request_body = {
+        "inputText": text,
+        "dimensions": dimensions,   # Titan V2: 256, 512 or 1024
+        "normalize": normalize,     # unit-length vector, good for cosine similarity
+    }
+
+    response = client.invoke_model(
+        modelId=embedding_model_id,
+        body=json.dumps(request_body),
+        accept="application/json",
+        contentType="application/json",
+    )
+
+    response_body = json.loads(response["body"].read())
+    return response_body["embedding"]   # list of `dimensions` floats
+```
+
+Running it on the first chunk of `report.md` returns 1024 floats such as
+`[-0.0583, 0.0117, 0.0318, ...]`.
+
+> - You may need to enable access to the Titan embeddings model in the Bedrock console first.
+> - The lesson says V1 (`amazon.titan-embed-text-v1`) works just as well. It does, but **not with this
+>   body**: V1 only accepts `inputText` (no `dimensions` or `normalize`) and always returns 1536 numbers.
+
+📓 [002_embeddings.ipynb](exercises/module_5/002_embeddings.ipynb) · data: [report.md](exercises/module_5/report.md)
 
 ## 4. The full RAG flow
 
