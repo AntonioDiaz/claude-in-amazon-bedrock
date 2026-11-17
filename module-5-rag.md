@@ -224,11 +224,15 @@ related to it? Plain keyword matching isn't enough (remember the "bug" example),
 An **embedding** is a list of numbers that represents the *meaning* of a piece of text, so that a
 computer can compare texts with math instead of words.
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/e4014a1a-17cd-463e-a7dc-6a53f4dc1d81" />
+
 ```mermaid
 flowchart LR
     T[Text chunk] --> M[Embedding model]
     M --> V[Vector of 1024 numbers]
 ```
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/341b233f-d339-4deb-8e86-0837069b85eb" />
 
 - The model returns a fixed-length vector (1024 numbers in this course).
 - Each number can be thought of as a **score for some quality** of the text: "how happy is it?", "how
