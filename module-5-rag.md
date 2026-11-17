@@ -8,6 +8,12 @@
   - [Challenges](#challenges)
   - [When to use RAG](#when-to-use-rag)
 - [2. Text chunking strategies](#2-text-chunking-strategies)
+  - [Why it matters](#why-it-matters)
+  - [The three strategies](#the-three-strategies)
+  - [Size-based chunking and overlap](#size-based-chunking-and-overlap)
+  - [Structure-based chunking](#structure-based-chunking)
+  - [Implementations](#implementations)
+  - [Choosing a strategy](#choosing-a-strategy)
 - [3. Text embeddings](#3-text-embeddings)
 - [4. The full RAG flow](#4-the-full-rag-flow)
 - [5. Implementing the RAG flow](#5-implementing-the-rag-flow)
@@ -88,7 +94,121 @@ RAG isn't free; it moves the difficulty somewhere else:
 
 ## 2. Text chunking strategies
 
-_Pending._
+Chunking is the step that decides the quality of the whole RAG pipeline: whatever lands in a chunk is
+what Claude gets to see. Bad chunks put **irrelevant context** in the prompt, and Claude answers
+confidently from the wrong material.
+
+### Why it matters
+
+Example: a report with a *medical research* section and a *software engineering* section. The user asks
+*"How many bugs did engineers fix this year?"*. If the chunks are poorly cut, retrieval can return a
+medical chunk just because it mentions a "bug" (in the biological sense), and the answer is wrong.
+
+> Goal: chunks that are **semantically coherent** (one topic each) and that still make sense when read
+> on their own.
+
+### The three strategies
+
+| Strategy | How it splits | Pros | Cons |
+|---|---|---|---|
+| **Size-based** | Fixed number of characters/words | Simple, works on any text | Cuts words and sentences, separates related content |
+| **Structure-based** | Headers, paragraphs, sections | Chunks follow the document's own organization | Needs a guaranteed, consistent format (e.g. Markdown) |
+| **Semantic-based** | Groups related sentences using NLP | Most meaningful chunks | Most complex and expensive to build |
+
+### Size-based chunking and overlap
+
+Split the text into pieces of roughly equal length. Reliable, but blind to meaning: a sentence can be
+cut in half and its context lost.
+
+**Overlap** mitigates that: each chunk repeats a few characters (or sentences) of its neighbour, so
+information at a boundary appears complete in at least one chunk. It costs some duplication, which is
+usually worth it.
+
+```mermaid
+flowchart LR
+    T[Text] --> A[Chunk 1: chars 0 to 150]
+    T --> B[Chunk 2: chars 130 to 280]
+    T --> C[Chunk 3: chars 260 to 410]
+    A -. 20 shared chars .- B
+    B -. 20 shared chars .- C
+```
+
+### Structure-based chunking
+
+If the documents have a reliable structure (Markdown with `##` headers, for example), split on it: each
+chunk is a real section. Excellent results on well-formatted documents; unreliable on plain text or
+inconsistent formatting.
+
+### Implementations
+
+**By characters**, with overlap:
+
+```python
+def chunk_by_char(text, chunk_size=150, chunk_overlap=20):
+    chunks = []
+    start_idx = 0
+
+    while start_idx < len(text):
+        end_idx = min(start_idx + chunk_size, len(text))
+        chunks.append(text[start_idx:end_idx])
+
+        # step back `chunk_overlap` chars, unless we already reached the end
+        start_idx = end_idx - chunk_overlap if end_idx < len(text) else len(text)
+
+    return chunks
+```
+
+**By sentences**, with sentence overlap:
+
+```python
+import re
+
+def chunk_by_sentence(text, max_sentences_per_chunk=5, overlap_sentences=1):
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    chunks = []
+    start_idx = 0
+
+    while start_idx < len(sentences):
+        end_idx = min(start_idx + max_sentences_per_chunk, len(sentences))
+        chunks.append(" ".join(sentences[start_idx:end_idx]))
+        start_idx += max_sentences_per_chunk - overlap_sentences
+
+    return chunks
+```
+
+> ⚠️ If `overlap_sentences >= max_sentences_per_chunk`, `start_idx` never advances and the loop is
+> infinite. The lesson's `if start_idx < 0` guard doesn't prevent this; validate
+> `overlap_sentences < max_sentences_per_chunk` instead. The regex also splits on abbreviations and
+> decimals ("e.g. ", "v2. "), so it's a poor fit for code or technical text.
+
+**By sections** (Markdown `##` headers):
+
+```python
+import re
+
+def chunk_by_section(document_text):
+    return re.split(r"\n## ", document_text)
+```
+
+> Note: `re.split` removes the separator, so each chunk loses its `## ` prefix, and the first chunk is
+> whatever comes before the first `##` (the document title). Use a lookahead, `re.split(r"\n(?=## )",
+> document_text)`, to keep the headers.
+
+### Choosing a strategy
+
+| Strategy | Best for | Watch out for |
+|---|---|---|
+| Character-based | User-uploaded documents with no format guarantee; the safe fallback | Cut sentences; tune size and overlap |
+| Sentence-based | Prose: good balance between context and meaning | Code and technical text with unexpected periods |
+| Section-based | Well-structured internal docs (Markdown, consistent headers) | Breaks if the structure isn't there; sections can be too long |
+
+Treat chunking as **iterative**: start simple, test with your real documents and questions, and refine
+based on the quality of what retrieval returns.
+
+> On AWS, **Bedrock Knowledge Bases** offers these strategies as managed options when you create a data
+> source: fixed-size (with overlap), hierarchical, semantic, or no chunking.
+
+📓 [001_chunking.ipynb](exercises/module_5/001_chunking.ipynb) · data: [report.md](exercises/module_5/report.md)
 
 ## 3. Text embeddings
 
