@@ -27,6 +27,10 @@
   - [Step 6 · Build the final prompt](#step-6--build-the-final-prompt)
   - [The complete flow](#the-complete-flow)
 - [5. Implementing the RAG flow](#5-implementing-the-rag-flow)
+  - [The `VectorIndex` class](#the-vectorindex-class)
+  - [The five steps in code](#the-five-steps-in-code)
+  - [Why store the text with the vector](#why-store-the-text-with-the-vector)
+  - [Reading the results](#reading-the-results)
 - [6. BM25 lexical search](#6-bm25-lexical-search)
 - [7. A multi-search RAG pipeline](#7-a-multi-search-rag-pipeline)
 - [8. Reranking results](#8-reranking-results)
@@ -348,6 +352,8 @@ the *direction* matters. Embedding APIs usually do it for you (Titan's `normaliz
 
 ### Step 3 · Store in a vector database
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/a0a028b1-6b74-4f64-8670-0f82a3f410bf" />
+
 The normalized vectors go into a **vector database**: a store optimized to keep long lists of numbers
 and search for the closest ones.
 
@@ -360,6 +366,8 @@ year?"*. It goes through **the same embedding model** (vectors from different mo
 compared): `[0.1, 0.89]` → normalized `[0.112, 0.994]`.
 
 ### Step 5 · Find the most similar chunks
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/6af8d05f-237f-481a-b121-153786c7e2ee" />
 
 The vector database returns the stored vectors closest to the query vector, measured with **cosine
 similarity**: the cosine of the angle between two vectors.
@@ -445,7 +453,118 @@ response = client.converse(modelId=model_id, messages=messages)
 
 ## 5. Implementing the RAG flow
 
-_Pending._
+Now the flow from the previous lesson, in code, over `report.md`. Steps 1–3 are preprocessing; steps
+4–5 run per question. The vector database is a small in-memory class, `VectorIndex`, so you can see
+exactly what a real one does.
+
+```mermaid
+flowchart LR
+    R[report.md] --> C[1 · chunk_by_section]
+    C --> E[2 · generate_embedding per chunk]
+    E --> S[3 · VectorIndex: vector + text]
+    Q[User question] --> QE[4 · generate_embedding]
+    QE --> SR[5 · store.search k=2]
+    S --> SR
+    SR --> RES[Top chunks + cosine distance]
+```
+
+### The `VectorIndex` class
+
+A brute-force vector store: two parallel lists, and a search that compares the query against every
+stored vector.
+
+| Method | What it does |
+|---|---|
+| `add_vector(vector, document)` | Stores the vector and its document (a dict that must have `content`). Checks all vectors have the same dimension. |
+| `add_document(document)` | Same, but computes the vector itself with the `embedding_fn` passed to the constructor. |
+| `search(query, k)` | `query` can be a vector, or a string if there's an `embedding_fn`. Returns the `k` closest `(document, distance)` pairs, sorted by distance ascending. |
+| `_cosine_distance` / `_euclidean_distance` | The metric, chosen with `distance_metric="cosine"` (default) or `"euclidean"`. |
+
+The core of it:
+
+```python
+def _cosine_distance(self, vec1, vec2):
+    mag1, mag2 = self._magnitude(vec1), self._magnitude(vec2)
+    if mag1 == 0 and mag2 == 0:
+        return 0.0
+    if mag1 == 0 or mag2 == 0:
+        return 1.0
+    similarity = self._dot_product(vec1, vec2) / (mag1 * mag2)
+    similarity = max(-1.0, min(1.0, similarity))   # guard against float rounding
+    return 1.0 - similarity                        # cosine distance: 0 = identical
+
+def search(self, query_vector, k=1):
+    distances = [
+        (self._cosine_distance(query_vector, v), doc)
+        for v, doc in zip(self.vectors, self.documents)
+    ]
+    distances.sort(key=lambda item: item[0])       # smallest distance first
+    return [(doc, dist) for dist, doc in distances[:k]]
+```
+
+> Simplified: the notebook's `search` also validates the input, accepts a string query and lets you
+> pick the metric.
+
+### The five steps in code
+
+```python
+# 1. Chunk the text by section
+with open("./report.md", "r") as f:
+    text = f.read()
+chunks = chunk_by_section(text)
+
+# 2. Embed every chunk (one Bedrock call per chunk, so it takes a while)
+embeddings = [generate_embedding(chunk) for chunk in chunks]
+
+# 3. Store each embedding together with its text
+store = VectorIndex()
+for embedding, chunk in zip(embeddings, chunks):
+    store.add_vector(embedding, {"content": chunk})
+
+# 4. Later, a user asks a question: embed it with the same model
+user_embedding = generate_embedding("What did the software engineering dept do last year?")
+
+# 5. Retrieve the 2 closest chunks
+results = store.search(user_embedding, 2)
+for doc, distance in results:
+    print(distance, "\n", doc["content"][0:200], "\n")
+```
+
+`chunk_by_section` and `generate_embedding` are the functions from sections 2 and 3.
+
+### Why store the text with the vector
+
+The search compares numbers, but what you need afterwards is **the text** to put in Claude's prompt. A
+vector on its own is useless, so each entry stores the embedding **plus metadata** (`{"content":
+chunk}`, and in a real system also the source, section, page…).
+
+### Reading the results
+
+`search` returns `(document, cosine distance)` pairs: **lower distance = more relevant**.
+
+| Query | 1st result | 2nd result |
+|---|---|---|
+| *"What did the software engineering dept do last year?"* (lesson) | Software Engineering · 0.71 | Methodology · 0.72 |
+| *"what happened with INC-2023-Q4-011?"* (my notebook) | Cybersecurity (INC-2023-Q4-011) · 0.63 | Financial Analysis · 0.81 |
+
+> The lesson and the completed notebook use different questions, so the numbers differ; the table shows
+> both.
+
+> In the lesson's run, the right section (0.71) and an unrelated one (0.72) are almost tied: semantic
+> search alone isn't very decisive. That's what the next lessons improve (BM25, multi-search,
+> reranking).
+
+> The lesson stops at retrieval. To finish the RAG flow, the retrieved `doc["content"]` goes into the
+> prompt with the question and is sent to Claude, as in [step 6 of the previous
+> section](#step-6--build-the-final-prompt).
+
+> `VectorIndex` is a learning tool: it compares against every vector (O(n)) and lives in memory. On AWS
+> the managed options are Bedrock Knowledge Bases on top of a vector store such as OpenSearch
+> Serverless, Aurora PostgreSQL (pgvector) or S3 Vectors.
+
+📓 [003_vectordb.ipynb](exercises/module_5/003_vectordb.ipynb) (exercise) ·
+[003_vectordb_completed.ipynb](exercises/module_5/003_vectordb_completed.ipynb) (solution) · data:
+[report.md](exercises/module_5/report.md)
 
 ## 6. BM25 lexical search
 
