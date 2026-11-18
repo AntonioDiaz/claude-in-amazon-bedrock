@@ -37,7 +37,18 @@
   - [How BM25 works](#how-bm25-works)
   - [Using `BM25Index`](#using-bm25index)
 - [7. A multi-search RAG pipeline](#7-a-multi-search-rag-pipeline)
+  - [The `Retriever`](#the-retriever)
+  - [Reciprocal Rank Fusion (RRF)](#reciprocal-rank-fusion-rrf)
+  - [Implementation](#implementation)
+  - [Results](#results)
+  - [Extensibility](#extensibility)
 - [8. Reranking results](#8-reranking-results)
+  - [LLM-based reranking](#llm-based-reranking)
+  - [The prompt](#the-prompt)
+  - [Return IDs, not text](#return-ids-not-text)
+  - [Implementation](#implementation-1)
+  - [Results](#results-1)
+  - [Trade-off](#trade-off)
 - [9. Contextual retrieval](#9-contextual-retrieval)
 - [Common pitfalls](#common-pitfalls)
 
@@ -675,11 +686,296 @@ Both sections that actually talk about the incident come first; Financial Analys
 
 ## 7. A multi-search RAG pipeline
 
-_Pending._
+With `VectorIndex` (semantic) and `BM25Index` (lexical) working on their own, the next step is to put
+them behind a single **`Retriever`** that queries both and merges the results.
+
+### The `Retriever`
+
+Both indexes share the same interface (`add_document()` + `search()`), so the `Retriever` can treat them
+the same way. It's a coordinator:
+
+1. Receives the user's question.
+2. Forwards it to every index (here `VectorIndex` and `BM25Index`).
+3. Collects each index's ranked results.
+4. Merges them into one ranking with **Reciprocal Rank Fusion**.
+
+```mermaid
+flowchart LR
+    Q[User question] --> R[Retriever]
+    R --> V[VectorIndex: semantic]
+    R --> B[BM25Index: lexical]
+    V --> F[Reciprocal Rank Fusion]
+    B --> F
+    F --> O[Single ranked list]
+```
+
+### Reciprocal Rank Fusion (RRF)
+
+The two indexes' scores aren't comparable (cosine distance vs transformed BM25 score), so adding them
+up makes no sense. RRF ignores the scores and uses only the **rank** each chunk got in each list:
+
+$$\text{RRF}(d) = \sum_{i} \frac{1}{k + \text{rank}_i(d)}$$
+
+- $\text{rank}_i(d)$: position of chunk $d$ in list $i$ (1 = first).
+- $k$: smoothing constant, usually **60**. With $k = 1$ the numbers are easier to read by hand.
+- A chunk missing from a list adds nothing for that list.
+- **Higher RRF = better** (unlike the distances returned by each index).
+
+Worked example with $k = 1$:
+
+| Chunk | Vector rank | BM25 rank | RRF score | Final |
+|---|---|---|---|---|
+| Section 2 | 1 | 2 | 1/2 + 1/3 = **0.833** | 1st |
+| Section 6 | 3 | 1 | 1/4 + 1/2 = **0.750** | 2nd |
+| Section 7 | 2 | 3 | 1/3 + 1/4 = **0.583** | 3rd |
+
+Section 2 wins because it's near the top of **both** lists; being first in only one isn't enough.
+
+> With $k = 60$ the scores become tiny (at most 2/61 ≈ 0.033 with two indexes) and the gaps between ranks
+> shrink, so one list ranking a chunk first counts for less. That's why the notebook's scores look like
+> 0.032.
+
+### Implementation
+
+The lesson's snippet is only a skeleton: it never calls the indexes (`all_results` stays empty). This is
+the working version from the notebook, slightly trimmed:
+
+```python
+class Retriever:
+    def __init__(self, *indexes):
+        if not indexes:
+            raise ValueError("At least one index must be provided")
+        self._indexes = list(indexes)
+
+    def add_document(self, document):
+        for index in self._indexes:            # same dict goes to every index
+            index.add_document(document)
+
+    def search(self, query_text, k=1, k_rrf=60):
+        # 1. Ask every index for more candidates than needed (k * 5)
+        all_results = [index.search(query_text, k=k * 5) for index in self._indexes]
+
+        # 2. Record each document's rank in each list (inf = not returned)
+        doc_ranks = {}
+        for idx, results in enumerate(all_results):
+            for rank, (doc, _) in enumerate(results):
+                entry = doc_ranks.setdefault(
+                    id(doc), {"doc": doc, "ranks": [float("inf")] * len(self._indexes)}
+                )
+                entry["ranks"][idx] = rank + 1
+
+        # 3. RRF score, highest first
+        def rrf(ranks):
+            return sum(1.0 / (k_rrf + r) for r in ranks if r != float("inf"))
+
+        scored = [(e["doc"], rrf(e["ranks"])) for e in doc_ranks.values()]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:k]
+```
+
+> Two details worth knowing:
+> - Each index is asked for `k * 5` results, so a chunk ranked low in one list still has a chance to be
+>   picked up by the other.
+> - Documents are matched across lists with `id(doc)`. It works because `add_document` passes **the same
+>   dict object** to both indexes; if an index copied the document, use a real ID field instead.
+
+Using it: `VectorIndex` now receives `embedding_fn`, so it can embed both chunks and string queries by
+itself:
+
+```python
+vector_index = VectorIndex(embedding_fn=generate_embedding)
+bm25_index = BM25Index()
+retriever = Retriever(bm25_index, vector_index)
+
+for chunk in chunk_by_section(text):
+    retriever.add_document({"content": chunk})   # one embedding call per chunk
+
+results = retriever.search("what did the eng team do with INC-2023-Q4-011?", 3)
+for doc, score in results:
+    print(score, "\n", doc["content"][0:200], "\n---\n")
+```
+
+### Results
+
+| # | Section | RRF score (k = 60) |
+|---|---|---|
+| 1 | Cybersecurity, INC-2023-Q4-011 | 0.0325 |
+| 2 | Software Engineering | 0.0323 |
+| 3 | Legal Developments | 0.0303 |
+
+The two sections that discuss the incident now come first. Compared with each search alone:
+
+| Search | Top results for the INC-2023-Q4-011 question |
+|---|---|
+| Semantic only (section 5) | Cybersecurity, **Financial Analysis** (unrelated) |
+| BM25 only (section 6) | Software Engineering, Cybersecurity, Methodology |
+| Hybrid (RRF) | Cybersecurity, Software Engineering, Legal |
+
+> The notebook's question (*"what did the eng team do with…"*) is slightly different from the lesson's
+> (*"what happened with…"*); the conclusion is the same.
+
+### Extensibility
+
+Any index that implements `add_document()` and `search()` can be plugged into the `Retriever`: another
+embedding model, a domain-specific search, a different lexical algorithm… RRF only needs ranks, so it
+merges any number of lists without tuning weights.
+
+📓 [005_hybrid.ipynb](exercises/module_5/005_hybrid.ipynb) (exercise) ·
+[005_hybrid_completed.ipynb](exercises/module_5/005_hybrid_completed.ipynb) (solution) · data:
+[report.md](exercises/module_5/report.md)
 
 ## 8. Reranking results
 
-_Pending._
+Hybrid search + RRF finds the right chunks, but the **order** can still be off. In section 7, the
+question *"what did the eng team do with INC-2023-Q4-011?"* put Cybersecurity first, even though it asks
+about the **engineering** team, so Software Engineering should lead. RRF only sees ranks; it doesn't
+understand the question.
+
+### LLM-based reranking
+
+**Reranking** is one more post-processing step: after the merge, send the candidates to Claude and ask
+it to reorder them by relevance to the question.
+
+1. Run the hybrid search (vector + BM25).
+2. Merge with RRF.
+3. Pass the merged results to a `reranker_fn`.
+4. The reranker sends question + documents to Claude.
+5. Claude returns the most relevant documents, in order.
+
+```mermaid
+flowchart LR
+    Q[User question] --> V[VectorIndex]
+    Q --> B[BM25Index]
+    V --> F[RRF merge]
+    B --> F
+    F --> R[Reranker: Claude]
+    Q --> R
+    R --> O[Reordered top k]
+```
+
+### The prompt
+
+Simple and specific: the question, the candidate documents in XML tags, and one task (*return the k most
+relevant, in decreasing order of relevance*).
+
+```text
+You are tasked with finding the documents most relevant to a user's question.
+
+<user_question>
+What happened with INC-2023-Q4-011?
+</user_question>
+
+Here are documents that may be relevant:
+<documents>
+<document>Section 10...</document>
+<document>Section 2...</document>
+...
+</documents>
+
+Return the 3 most relevant docs, in order of decreasing relevance.
+```
+
+### Return IDs, not text
+
+Asking Claude to copy the chunks back would be slow and expensive (output tokens). Instead, give each
+chunk a **short unique ID** beforehand and ask only for the IDs: `["1p5g", "51n3", "ab83"]`.
+
+In the notebook the `Retriever` assigns a random 4-character `id` in `add_document`, so every chunk
+already has one when it reaches the reranker.
+
+### Implementation
+
+The lesson's snippet is incomplete (`messages` is never built). The notebook version:
+
+~~~python
+def reranker_fn(docs, query_text, k):
+    joined_docs = "\n".join(
+        f"<document><document_id>{doc['id']}</document_id>"
+        f"<document_content>{doc['content']}</document_content></document>"
+        for doc in docs
+    )
+
+    prompt = f"""
+You are about to be given a set of documents, along with an id of each.
+Your task is to select the {k} most relevant documents to answer the user's question.
+
+<question>
+{query_text}
+</question>
+
+<documents>
+{joined_docs}
+</documents>
+
+Respond in the following format:
+```json
+{{
+    "document_ids": str[] # {k} document ids, sorted in order of decreasing relevance
+}}
+```
+"""
+
+    messages = []
+    add_user_message(messages, prompt)
+    add_assistant_message(messages, "```json")          # prefill: Claude continues inside the JSON block
+
+    result = chat(messages, stop_sequences=["```"])     # stop before the closing fence
+    return json.loads(result["text"])["document_ids"]
+~~~
+
+This is the structured-output trick from module 1 (**prefill + stop sequence**) on the Converse API:
+`chat` sends the stop sequence as `inferenceConfig.stopSequences`.
+
+The `Retriever` takes it as an optional argument and applies it after RRF:
+
+```python
+retriever = Retriever(bm25_index, vector_index, reranker_fn=reranker_fn)
+
+# inside Retriever.search, after RRF:
+result = filtered_docs[:k]
+if self._reranker_fn is not None:
+    docs_only = [doc for doc, _ in result]
+    doc_lookup = {doc["id"]: doc for doc in docs_only}
+    reranked_ids = self._reranker_fn(docs_only, query_text, k)
+    result = [(doc_lookup[i], original_score(doc_lookup[i]))
+              for i in reranked_ids if i in doc_lookup]   # unknown IDs are ignored
+```
+
+> Simplified: `original_score` stands for the notebook's lookup of each document's RRF score.
+
+### Results
+
+`retriever.search("what did the eng team do with INC-2023-Q4-011?", 2)`:
+
+| # | Without reranking (section 7) | With reranking |
+|---|---|---|
+| 1 | Cybersecurity | **Software Engineering** |
+| 2 | Software Engineering | Cybersecurity |
+
+Claude understands that "eng team" points to Software Engineering, not just to whichever chunk mentions
+the incident most.
+
+> **The printed score is still the RRF score**, so after reranking the list is no longer sorted by it
+> (0.0323 appears above 0.0325). The order comes from Claude; the number is just carried over.
+
+> **Limitation of this implementation:** the reranker only receives the RRF top `k` (`filtered_docs[:k]`)
+> and returns `k`, so it can **reorder** them but never pull in a better chunk that RRF ranked
+> `k+1`. The lesson's prompt example (4 candidates, return 3) hints at the usual approach: pass more
+> candidates than you need (e.g. `filtered_docs[:k * 3]`) and let Claude choose the `k`.
+
+### Trade-off
+
+| | Without reranking | With reranking |
+|---|---|---|
+| Accuracy | Rank-based only | Claude understands the question in context |
+| Latency | Searches only | + one Claude call per query |
+| Cost | Embeddings | + input tokens for every candidate chunk |
+
+> On Bedrock there are also managed rerank models (Amazon Rerank, Cohere Rerank) through the `Rerank` API,
+> also usable inside Knowledge Bases queries: cheaper and faster than a full Claude call, but they don't
+> follow instructions the way Claude does.
+
+📓 [006_reranking.ipynb](exercises/module_5/006_reranking.ipynb) · data: [report.md](exercises/module_5/report.md)
 
 ## 9. Contextual retrieval
 
