@@ -19,6 +19,13 @@
   - [Why it matters for RAG](#why-it-matters-for-rag)
   - [Generating embeddings on Bedrock](#generating-embeddings-on-bedrock)
 - [4. The full RAG flow](#4-the-full-rag-flow)
+  - [Step 1 · Chunk the source text](#step-1--chunk-the-source-text)
+  - [Step 2 · Embed and normalize](#step-2--embed-and-normalize)
+  - [Step 3 · Store in a vector database](#step-3--store-in-a-vector-database)
+  - [Step 4 · Embed the user query](#step-4--embed-the-user-query)
+  - [Step 5 · Find the most similar chunks](#step-5--find-the-most-similar-chunks)
+  - [Step 6 · Build the final prompt](#step-6--build-the-final-prompt)
+  - [The complete flow](#the-complete-flow)
 - [5. Implementing the RAG flow](#5-implementing-the-rag-flow)
 - [6. BM25 lexical search](#6-bm25-lexical-search)
 - [7. A multi-search RAG pipeline](#7-a-multi-search-rag-pipeline)
@@ -300,7 +307,141 @@ Running it on the first chunk of `report.md` returns 1024 floats such as
 
 ## 4. The full RAG flow
 
-_Pending._
+This lesson puts chunking and embeddings together and walks through the whole pipeline with a toy
+example small enough to check by hand.
+
+```mermaid
+flowchart TB
+    subgraph PRE[Preprocessing, ahead of time]
+        A[1 · Chunk source text] --> B[2 · Embed + normalize each chunk]
+        B --> C[3 · Store in vector database]
+    end
+    subgraph Q[At query time]
+        D[4 · Embed the user query] --> E[5 · Find closest chunks: cosine similarity]
+        E --> F[6 · Build prompt: question + chunks]
+        F --> G[Claude answers]
+    end
+    C --> E
+```
+
+### Step 1 · Chunk the source text
+
+Two chunks, both chosen to be ambiguous on purpose:
+
+| Chunk | Text (summary) | Trap |
+|---|---|---|
+| **Medical research** | Progress understanding XDR-47, a "bug" never seen before | "bug" sounds like software |
+| **Software engineering** | Studying "infection vectors" in distributed systems | "infection" sounds medical |
+
+### Step 2 · Embed and normalize
+
+Imagine a perfect embedding model that returns **2 numbers** with known meaning:
+`[how medical, how software]`.
+
+| Chunk | Raw embedding | Normalized (length 1) |
+|---|---|---|
+| Medical research | `[0.97, 0.34]` | `[0.944, 0.331]` |
+| Software engineering | `[0.30, 0.97]` | `[0.295, 0.955]` |
+
+**Normalization** scales each vector to magnitude 1.0, so every point lies on the unit circle and only
+the *direction* matters. Embedding APIs usually do it for you (Titan's `normalize=True`).
+
+### Step 3 · Store in a vector database
+
+The normalized vectors go into a **vector database**: a store optimized to keep long lists of numbers
+and search for the closest ones.
+
+> Up to here everything is **preprocessing**, done once ahead of time. The rest happens per query.
+
+### Step 4 · Embed the user query
+
+Query: *"I'm curious about the company. In particular, what did the software engineering dept do this
+year?"*. It goes through **the same embedding model** (vectors from different models can't be
+compared): `[0.1, 0.89]` → normalized `[0.112, 0.994]`.
+
+### Step 5 · Find the most similar chunks
+
+The vector database returns the stored vectors closest to the query vector, measured with **cosine
+similarity**: the cosine of the angle between two vectors.
+
+$$\cos(\theta) = \frac{A \cdot B}{\|A\| \, \|B\|}$$
+
+| Cosine similarity | Meaning |
+|---|---|
+| ≈ 1 | Same direction → very similar |
+| ≈ 0 | Perpendicular → unrelated |
+| ≈ -1 | Opposite |
+
+With normalized vectors both magnitudes are 1, so the cosine is just the **dot product**:
+
+| Query vs… | Cosine similarity | |
+|---|---|---|
+| Software engineering | **0.982** | ✅ best match |
+| Medical research | 0.434 | |
+
+> The lesson gives 0.983 and **0.398**. Recomputing from its own vectors gives ≈ 0.982 and **0.434**
+> (and the normalized query is `[0.112, 0.994]`, not `0.993`). The conclusion doesn't change.
+
+```python
+import math
+
+def normalize(v):
+    norm = math.sqrt(sum(x * x for x in v))
+    return [x / norm for x in v]
+
+def cosine_similarity(a, b):
+    return sum(x * y for x, y in zip(a, b))   # a and b already normalized
+
+medical  = normalize([0.97, 0.34])
+software = normalize([0.30, 0.97])
+query    = normalize([0.10, 0.89])
+
+cosine_similarity(query, software)   # 0.982
+cosine_similarity(query, medical)    # 0.434
+```
+
+**Cosine distance** = `1 - cosine similarity`. Vector databases often use it instead: **0 = identical**,
+bigger = less similar (so you sort ascending).
+
+| Measure | Most similar | Sort |
+|---|---|---|
+| Cosine similarity | Close to 1 | Descending |
+| Cosine distance | Close to 0 | Ascending |
+
+### Step 6 · Build the final prompt
+
+Combine the user's question with the retrieved chunk(s) and send it to Claude, which now answers from
+the document instead of from its general knowledge. In Converse format:
+
+```python
+prompt = f"""
+Answer the user's question using the report excerpt below.
+
+<user_question>
+{user_question}
+</user_question>
+
+<report_excerpt>
+{software_engineering_chunk}
+</report_excerpt>
+"""
+
+messages = [{"role": "user", "content": [{"text": prompt}]}]
+response = client.converse(modelId=model_id, messages=messages)
+```
+
+### The complete flow
+
+1. Chunk the source documents.
+2. Embed each chunk (normalized).
+3. Store the embeddings in a vector database.
+4. Embed the user's question with the same model.
+5. Retrieve the most similar chunks (cosine similarity / distance).
+6. Put the chunks and the question in the prompt.
+7. Send it to Claude.
+
+> Knowing the math behind steps 4–5 is what lets you debug a RAG system when it retrieves the wrong
+> chunks.
 
 ## 5. Implementing the RAG flow
 
