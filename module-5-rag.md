@@ -50,6 +50,10 @@
   - [Results](#results-1)
   - [Trade-off](#trade-off)
 - [9. Contextual retrieval](#9-contextual-retrieval)
+  - [How it works](#how-it-works)
+  - [Large documents](#large-documents)
+  - [Implementation](#implementation-2)
+  - [Results](#results-2)
 - [Common pitfalls](#common-pitfalls)
 
 ---
@@ -979,7 +983,139 @@ the incident most.
 
 ## 9. Contextual retrieval
 
-_Pending._
+Chunking has a side effect: each chunk is cut off from the rest of the document. A section that says
+*"the patch reduced failures by 40%"* doesn't say which report, which project or which other sections it
+relates to, so both embeddings and BM25 have less to match on.
+
+**Contextual retrieval** fixes this in preprocessing: before indexing, ask Claude to write a short
+context for each chunk that **situates it within the whole document**, and index *context + chunk*.
+
+### How it works
+
+```mermaid
+flowchart LR
+    D[Source document] --> C[Chunks]
+    C --> L[Claude: write context for each chunk]
+    D --> L
+    L --> X[Context + chunk = contextualized chunk]
+    X --> V[VectorIndex]
+    X --> B[BM25Index]
+```
+
+For each chunk, send Claude the chunk **and** the source document:
+
+```text
+Write a short and succinct snippet of text to situate this chunk within the
+overall source document for the purposes of improving search retrieval of the chunk.
+
+Here is the original source document:
+<document>
+{source_text}
+</document>
+
+Here is the chunk we want to situate within the whole document:
+<chunk>
+{text_chunk}
+</chunk>
+
+Answer only with the succinct context and nothing else.
+```
+
+Example of generated context (from my notebook, for Section 2):
+
+> *"This chunk is Section 2 of an Annual Interdisciplinary Research Review, detailing software engineering
+> efforts to resolve stability issues in Project Phoenix. It follows the Methodology section and precedes
+> Financial Analysis, forming part of a comprehensive report that covers ten research domains across the
+> organization."*
+
+That text is prepended to the chunk, and the result is what goes into **both** indexes.
+
+> The lesson's other example mentions "INC-2023-**04**-011"; the ID in the report is INC-2023-**Q4**-011.
+
+### Large documents
+
+If the whole document doesn't fit in the prompt (or is too expensive to send once per chunk), give Claude
+a **reduced context** instead:
+
+| Include | Why |
+|---|---|
+| A few chunks from the **start** of the document | They usually hold the title, summary or abstract: the global picture |
+| The chunks **just before** the target chunk | Local context: what leads into this section |
+
+### Implementation
+
+```python
+def add_context(text_chunk, source_text):
+    prompt = f"""
+Write a short and succinct snippet of text to situate this chunk within the
+overall source document for the purposes of improving search retrieval of the chunk.
+
+Here is the original source document:
+<document>
+{source_text}
+</document>
+
+Here is the chunk we want to situate within the whole document:
+<chunk>
+{text_chunk}
+</chunk>
+
+Answer only with the succinct context and nothing else.
+"""
+    messages = []
+    add_user_message(messages, prompt)
+    result = chat(messages)                       # Converse call via the chat helper
+    return result["text"] + "\n" + text_chunk     # context first, then the original chunk
+```
+
+Indexing with the reduced context (2 start chunks + 2 previous chunks):
+
+```python
+num_start_chunks = 2
+num_prev_chunks = 2
+
+for i, chunk in enumerate(chunks):
+    context_parts = []
+    context_parts.extend(chunks[:min(num_start_chunks, len(chunks))])   # start of the doc
+
+    start_idx = max(0, i - num_prev_chunks)
+    context_parts.extend(chunks[start_idx:i])                           # chunks just before
+
+    context = "\n".join(context_parts)
+    contextualized_chunk = add_context(chunk, context)
+    retriever.add_document({"content": contextualized_chunk})
+```
+
+> For the first chunks the two windows overlap (for `i = 1`, chunk 0 is added twice) and for `i = 0` the
+> chunk is part of its own context. Harmless, but `start_idx = max(num_start_chunks, i - num_prev_chunks)`
+> avoids the duplicates.
+
+The `retriever` is the one from section 8 (vector + BM25 + RRF + reranker); only the indexed content
+changes.
+
+### Results
+
+`retriever.search("what did the eng team do with INC-2023-Q4-011?", 2)` in my notebook:
+
+| # | Contextualized chunk (start) | RRF score |
+|---|---|---|
+| 1 | *"This chunk describes cybersecurity incident INC-2023-Q4-011 from Section 10…"* | 0.0325 |
+| 2 | *"This chunk details Software Engineering's work on Project Phoenix…"* | 0.0325 |
+
+The results now **start with the generated context**, which explains the whole section in one sentence.
+For this short, well-structured report the ranking barely changes: the two relevant sections still come
+first. The lesson says as much: the gain grows with long, complex documents full of cross-references
+between sections.
+
+> **Cost:** one Claude call per chunk at indexing time, each one carrying the document (or the reduced
+> context). It's paid once, not per query, and prompt caching (module 6) makes re-sending the same
+> document much cheaper.
+
+> Not in the lesson: Anthropic's [Contextual Retrieval](https://www.anthropic.com/engineering/contextual-retrieval)
+> article, which introduced the technique, reports (top-20 chunks) about 35% fewer failed retrievals with contextual
+> embeddings, 49% adding contextual BM25, and 67% adding reranking.
+
+📓 [007_contextual.ipynb](exercises/module_5/007_contextual.ipynb) · data: [report.md](exercises/module_5/report.md)
 
 ---
 
