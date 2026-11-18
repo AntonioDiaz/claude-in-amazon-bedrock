@@ -32,6 +32,10 @@
   - [Why store the text with the vector](#why-store-the-text-with-the-vector)
   - [Reading the results](#reading-the-results)
 - [6. BM25 lexical search](#6-bm25-lexical-search)
+  - [When semantic search falls short](#when-semantic-search-falls-short)
+  - [Hybrid search](#hybrid-search)
+  - [How BM25 works](#how-bm25-works)
+  - [Using `BM25Index`](#using-bm25index)
 - [7. A multi-search RAG pipeline](#7-a-multi-search-rag-pipeline)
 - [8. Reranking results](#8-reranking-results)
 - [9. Contextual retrieval](#9-contextual-retrieval)
@@ -568,7 +572,106 @@ chunk}`, and in a real system also the source, section, page…).
 
 ## 6. BM25 lexical search
 
-_Pending._
+Semantic search finds text with a similar *meaning*, but it can miss **exact terms**: IDs, codes,
+product names. The fix is to add a classic **lexical** (keyword) search, BM25, and combine both.
+
+### When semantic search falls short
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/b156585a-affe-4482-9649-14754004dccc" />
+
+Query: *"What happened with INC-2023-Q4-011?"*. The incident ID appears literally in the sections that
+discuss it, yet semantic search can rank sections that are only "similar in topic" above them, because
+embeddings capture meaning, not exact strings.
+
+> In my run of [section 5](#5-implementing-the-rag-flow) semantic search did put Cybersecurity first
+> (0.63), but the 2nd result was Financial Analysis (0.81), which doesn't mention the incident, and it
+> missed Software Engineering, which does.
+
+### Hybrid search
+
+Run both searches **in parallel** over the same chunks and **merge** the results (the merge is the next
+lesson):
+
+```mermaid
+flowchart LR
+    Q[User query] --> S[Semantic search: embeddings]
+    Q --> L[Lexical search: BM25]
+    S --> M[Merge results]
+    L --> M
+    M --> R[Final ranked chunks]
+```
+
+| | Semantic (embeddings) | Lexical (BM25) |
+|---|---|---|
+| Matches | Meaning, synonyms, paraphrases | Exact words |
+| Strong at | Vague or conceptual questions | IDs, codes, names, rare terms |
+| Weak at | Exact identifiers | Synonyms, different wording |
+| Needs | Embedding model + vector store | Just the text (no model) |
+
+### How BM25 works
+
+**BM25** (*Best Match 25*) scores each chunk against the query:
+
+1. **Tokenize** the query into terms.
+2. **Count** two things: how often each term appears *in each chunk* (term frequency) and *in how many
+   chunks* it appears (document frequency).
+3. **Weight by rarity** (IDF): terms that appear in few chunks are worth a lot, terms that appear
+   everywhere ("the", "what") are worth almost nothing.
+4. **Score** each chunk: more occurrences of high-weight terms → higher score.
+
+The formula used in the notebook ($N$ = number of chunks, $n_t$ = chunks containing term $t$,
+$f_{t,d}$ = occurrences of $t$ in chunk $d$):
+
+$$\text{IDF}(t) = \ln\left(\frac{N - n_t + 0.5}{n_t + 0.5} + 1\right)$$
+
+$$\text{score}(q, d) = \sum_{t \in q} \text{IDF}(t) \cdot \frac{f_{t,d}\,(k_1 + 1)}{f_{t,d} + k_1\left(1 - b + b\,\frac{|d|}{\text{avgdl}}\right)}$$
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `k1` | 1.5 | Term-frequency saturation: the 10th occurrence adds much less than the 1st |
+| `b` | 0.75 | Length normalization: long chunks don't win just for having more words |
+
+### Using `BM25Index`
+
+Same API as `VectorIndex` (`add_document` + `search`), so both stores can be used side by side. No
+embeddings needed: it indexes the raw text.
+
+```python
+# 1. Chunk the text by section
+chunks = chunk_by_section(text)
+
+# 2. Create a BM25 store and add each chunk
+store = BM25Index()          # k1=1.5, b=0.75
+for chunk in chunks:
+    store.add_document({"content": chunk})
+
+# 3. Search
+results = store.search("What happened with INC-2023-Q4-011?", 3)
+for doc, score in results:
+    print(score, "\n", doc["content"][0:200], "\n----\n")
+```
+
+Results in my notebook:
+
+| # | Section | Score |
+|---|---|---|
+| 1 | Software Engineering (mentions the incident) | 0.27 |
+| 2 | Cybersecurity, INC-2023-Q4-011 | 0.33 |
+| 3 | Methodology | 0.94 |
+
+Both sections that actually talk about the incident come first; Financial Analysis is gone.
+
+> **The score is "lower is better".** Raw BM25 is "higher is better", but `search` converts it with
+> `exp(-0.1 · raw_score)` so it behaves like a distance (≈ 0 = great match, ≈ 1 = poor), the same as
+> `VectorIndex`. That makes the two lists easier to merge later.
+
+> **Tokenization detail:** the default tokenizer lowercases and splits on non-word characters, so
+> `INC-2023-Q4-011` becomes `inc`, `2023`, `q4`, `011`. It's not matched as one term; it works because
+> those tokens are rare and appear together. A custom `tokenizer` can keep IDs whole.
+
+📓 [004_bm25.ipynb](exercises/module_5/004_bm25.ipynb) (exercise) ·
+[004_bm25_completed.ipynb](exercises/module_5/004_bm25_completed.ipynb) (solution) · data:
+[report.md](exercises/module_5/report.md)
 
 ## 7. A multi-search RAG pipeline
 
