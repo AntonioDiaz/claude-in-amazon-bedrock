@@ -34,6 +34,9 @@
   - [Minimum length](#minimum-length)
   - [Where to put cache points](#where-to-put-cache-points)
 - [7. Prompt caching in action](#7-prompt-caching-in-action)
+  - [Updating `chat()`](#updating-chat)
+  - [Running it](#running-it)
+  - [Reading `usage`](#reading-usage)
 - [Common pitfalls](#common-pitfalls)
 
 ---
@@ -625,13 +628,129 @@ flowchart LR
 
 ## 7. Prompt caching in action
 
-_Pending._
+> The lesson page has no text (video + notebooks), so this section is based on the notebook.
+
+The exercise updates `chat()` so it **always caches the system prompt and the tool list**, the two places
+that rarely change, and returns `usage` to check that the cache works. To test it, it uses a long system
+prompt (~6k tokens, a JavaScript code generator spec) and three tool schemas (~1.2k tokens), well above
+the 1024-token minimum.
+
+### Updating `chat()`
+
+The notebook's three TODOs:
+
+| TODO | Change |
+|---|---|
+| Always cache the system prompt | Add a `cachePoint` after the system text |
+| Always cache the tool list | Append a `cachePoint` at the end of `tools` |
+| Return caching stats | Return `response["usage"]` |
+
+```python
+def chat(messages, system=None, temperature=1.0, stop_sequences=[], tools=None,
+         tool_choice="auto", text_editor=None, thinking=False, thinking_budget=1024):
+    params = {
+        "modelId": model_id,
+        "messages": messages,
+        "inferenceConfig": {"temperature": temperature, "stopSequences": stop_sequences},
+    }
+
+    if system:
+        params["system"] = [
+            {"text": system},
+            {"cachePoint": {"type": "default"}},  # cache the system prompt
+        ]
+
+    tool_choices = {"auto": {"auto": {}}, "any": {"any": {}}}
+    if tools or text_editor:
+        choice = tool_choices.get(tool_choice, {"tool": {"name": tool_choice}})
+        tools_with_cache = tools + [{"cachePoint": {"type": "default"}}]  # cache the tools
+        params["toolConfig"] = {"tools": tools_with_cache, "toolChoice": choice}
+
+    # ... text_editor / thinking as before ...
+
+    response = client.converse(**params)
+    parts = response["output"]["message"]["content"]
+
+    return {
+        "usage": response["usage"],  # caching stats
+        "parts": parts,
+        "stop_reason": response["stopReason"],
+        "text": "\n".join(p["text"] for p in parts if "text" in p),
+    }
+```
+
+> ⚠️ Not in the lesson: `tools + [...]` fails if `tools` is `None` and only `text_editor` is passed.
+> Safer: `(tools or []) + [{"cachePoint": {"type": "default"}}]`.
+
+### Running it
+
+```python
+messages = []
+add_user_message(messages, [{"text": "Summarize the design spec in one sentence."}])
+
+response = chat(
+    messages,
+    system=code_prompt,
+    tools=[add_duration_to_datetime_schema, set_reminder_schema, get_current_datetime_schema],
+)
+response["usage"]
+```
+
+### Reading `usage`
+
+First call (notebook output):
+
+```python
+{'inputTokens': 151,
+ 'outputTokens': 79,
+ 'totalTokens': 7798,
+ 'cacheReadInputTokens': 0,
+ 'cacheWriteInputTokens': 7568}
+```
+
+| Field | Meaning | 1st call | Repeat within 5 min (expected) |
+|---|---|---|---|
+| `cacheWriteInputTokens` | Tokens written to the cache (tools + system) | 7568 | 0 |
+| `cacheReadInputTokens` | Tokens read from the cache | 0 | 7568 |
+| `inputTokens` | Uncached input (the user message…) | 151 | ~151 |
+| `outputTokens` | Generated tokens | 79 | varies |
+
+`totalTokens` = `inputTokens` + `outputTokens` + cache read + cache write (151 + 79 + 7568 = 7798):
+`inputTokens` **doesn't include** the cached tokens.
+
+> The "repeat" column is the expected behaviour, not an output saved in the notebook. Run the cell
+> again within 5 minutes to check it. Then try changing a single character of `code_prompt`: the
+> system prompt cache misses and is written again (the tools cache, which goes first, should still hit).
+
+```mermaid
+flowchart LR
+    A[1st call] -->|cacheWrite 7568| K[(Cache 5 min)]
+    B[2nd call, same tools and system] -->|cacheRead 7568| K
+    C[System prompt changed] -->|miss on system, write again| K
+```
+
+📓 [003_caching.ipynb](exercises/module_6/003_caching.ipynb) · [003_caching_completed.ipynb](exercises/module_6/003_caching_completed.ipynb)
 
 ---
 
 ## Common pitfalls
 
-_Pending._
+- Thinking: `budget_tokens` below 1024 or not lower than `maxTokens` → request rejected.
+- Thinking: changing `temperature` / `top_p` / `top_k` or forcing a tool (`any` / specific tool) → not allowed with thinking on.
+- Editing or dropping reasoning blocks (`reasoningText` with its `signature`, or `redactedContent`) when sending them back → signature check fails; return them **unchanged**.
+- Code that only handles `reasoningText` → breaks on `redactedContent`; test both (magic string).
+- Enabling thinking by default → more cost and latency; decide with **evals**, after optimizing the prompt.
+- Simple prompts with images → same prompt engineering as text: steps, guidelines, examples.
+- Images bigger than needed (>~1568 px long edge) → more latency and tokens, no better result; and Bedrock limits: 20 images, 3.75 MB, 8000 px.
+- PDF on Converse **without citations** → only the extracted text; charts, tables as images and scanned pages are invisible.
+- PDF `name` with dots, underscores or extension (`earth.pdf`) → invalid name; use letters, numbers, spaces, hyphens, parentheses, brackets.
+- Citations on, but `chat()` only joins `text` parts → the cited sentences (`citationsContent`) are lost.
+- Prompt caching: forgetting the `cachePoint` → nothing is cached (it's not automatic).
+- Variable content (date, user name, question) **before** the cache point → a miss on every request; stable first, variable last.
+- Prefix below the model's minimum (1024 / 2048 tokens) → cache point silently ignored; check `cacheWriteInputTokens`.
+- Changing the tools → invalidates the system and messages cache too (order: tools → system → messages).
+- Expecting hits after more than 5 minutes idle → the cache expired; the first call pays the write again.
+- Looking only at `inputTokens` → it excludes cached tokens; read `cacheReadInputTokens` / `cacheWriteInputTokens`.
 
 ---
 

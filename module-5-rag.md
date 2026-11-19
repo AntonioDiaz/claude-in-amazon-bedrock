@@ -1121,7 +1121,21 @@ between sections.
 
 ## Common pitfalls
 
-_Pending._
+- Using RAG when the document fits in the prompt → extra moving parts for nothing; RAG pays off with scale, speed or cost.
+- Chunks that are too small or cut mid-idea → retrieved text makes no sense alone; use overlap or structure-based chunking.
+- Sentence chunking with `overlap_sentences >= max_sentences_per_chunk` → infinite loop.
+- `re.split` on headers drops the `## ` prefix → use a lookahead (`\n(?=## )`).
+- Different embedding models (or settings) for documents and queries → vectors aren't comparable.
+- Titan V1 with the V2 body (`dimensions`, `normalize`) → error; V1 only takes `inputText`.
+- Not normalizing vectors when the math assumes length 1 → wrong similarity values.
+- Storing only the vector → nothing to put in the prompt; store the text with it.
+- Semantic search alone for exact IDs or rare terms (`INC-2023-Q4-011`) → misses; add BM25 (hybrid).
+- Mixing score scales: notebook BM25 and vector distances are "lower is better", raw BM25 is "higher is better" → merge by **rank** (RRF), not by raw score.
+- Reranking only the top `k` → can reorder but never recover a good chunk ranked `k+1`; pass more candidates than you return.
+- Asking the reranker to return text instead of IDs → slower, costlier and error-prone.
+- Contextual retrieval over the full document for every chunk → expensive; use prompt caching or a summary + nearby sections for large documents.
+- Retrieving chunks but never sending them to Claude → the RAG flow ends with step 6 (prompt with context + question).
+- On AWS, consider the managed path: **Bedrock Knowledge Bases** (chunking, vector store, retrieval) and the `Rerank` API.
 
 ---
 
