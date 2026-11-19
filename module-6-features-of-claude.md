@@ -15,6 +15,9 @@
   - [Prompting techniques](#prompting-techniques)
   - [Example: fire risk assessment](#example-fire-risk-assessment)
 - [3. PDF support](#3-pdf-support)
+  - [Sending a PDF](#sending-a-pdf)
+  - [What Claude can do with PDFs](#what-claude-can-do-with-pdfs)
+  - [Text only vs full visual understanding](#text-only-vs-full-visual-understanding)
 - [4. Citations](#4-citations)
 - [5. Prompt caching](#5-prompt-caching)
 - [6. Rules of prompt caching](#6-rules-of-prompt-caching)
@@ -274,7 +277,73 @@ response["text"]
 
 ## 3. PDF support
 
-_Pending._
+Claude reads PDFs as easily as images: summaries, Q&A over the content, information extraction… even with
+multi-page documents that mix text, images, tables and charts.
+
+### Sending a PDF
+
+Same idea as images, but with a `document` block instead of `image`:
+
+| Field | Value |
+|---|---|
+| Block type | `document` (instead of `image`) |
+| `format` | `"pdf"` |
+| `name` | File name **without extension** |
+| `source` | `{"bytes": file_bytes}` (raw bytes, as with images) |
+
+```python
+with open("./earth.pdf", "rb") as f:
+    file_bytes = f.read()
+
+messages = []
+add_user_message(messages, [
+    {"document": {"format": "pdf", "name": "earth", "source": {"bytes": file_bytes}}},
+    {"text": "Summarize this document in one sentence"},
+])
+
+response = chat(messages)
+response["text"]
+```
+
+In the lesson, Claude summarizes the Wikipedia article about Earth (multi-page, with images and complex
+layout) in one sentence.
+
+> Not in the lesson (Bedrock): `name` only accepts letters, numbers, spaces, hyphens, parentheses and
+> square brackets (no consecutive spaces), because it's inserted into the prompt. Bedrock's Converse
+> `document` block also accepts other formats (`csv`, `doc`, `docx`, `xls`, `xlsx`, `html`, `txt`, `md`),
+> and has per-request limits on the number and size of documents (check the Bedrock docs for your model).
+
+### What Claude can do with PDFs
+
+- Extract and summarize key information
+- Answer specific questions about the content
+- Analyze the document's structure and format
+- Handle multi-page documents
+- Understand PDFs with both text and images
+
+Combined with **citations** (next lesson), Claude can point to the exact parts of the document it used:
+very useful for research and document analysis.
+
+### Text only vs full visual understanding
+
+> Not in the lesson: on Bedrock's Converse API a PDF can be processed in two ways.
+
+| Mode | When | What Claude sees |
+|---|---|---|
+| Converse document chat | Default | Only the **extracted text** |
+| Claude PDF chat | **Citations enabled** on the document | Text **and** each page as an image (charts, tables, scanned pages) |
+
+```mermaid
+flowchart LR
+    A[PDF in a document block] --> B{Citations enabled?}
+    B -- No --> C[Text extraction only]
+    B -- Yes --> D[Text plus page images, full visual understanding]
+```
+
+If the PDF has charts or scanned pages that matter, enable citations (or use `InvokeModel`). In visual
+mode each page costs text tokens **plus** image tokens.
+
+📓 [003_pdf.ipynb](exercises/module_6/003_pdf.ipynb) · data: [earth.pdf](exercises/module_6/earth.pdf)
 
 ---
 
