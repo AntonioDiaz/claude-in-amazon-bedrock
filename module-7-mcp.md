@@ -47,6 +47,8 @@ flowchart LR
 
 ### How MCP works
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/d528a6c2-a43e-459c-95fb-1bbba7801a56" />
+
 MCP moves the **definition and execution** of tools from your server to dedicated **MCP servers**. Each MCP
 server is a wrapper around an outside service (GitHub, AWS, a database...) and exposes:
 
