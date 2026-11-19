@@ -28,6 +28,11 @@
   - [The solution](#the-solution)
   - [Benefits and limitations](#benefits-and-limitations)
 - [6. Rules of prompt caching](#6-rules-of-prompt-caching)
+  - [Cache points](#cache-points)
+  - [How cache points work](#how-cache-points-work)
+  - [Caching across messages](#caching-across-messages)
+  - [Minimum length](#minimum-length)
+  - [Where to put cache points](#where-to-put-cache-points)
 - [7. Prompt caching in action](#7-prompt-caching-in-action)
 - [Common pitfalls](#common-pitfalls)
 
@@ -528,7 +533,93 @@ makes several requests close together.
 
 ## 6. Rules of prompt caching
 
-_Pending._
+Quick reminder: the first request **writes** to the cache, later ones **read** from it, and the cache
+lives **5 minutes**. Only useful when you resend the same content in a short time.
+
+### Cache points
+
+Caching is **not automatic**: you mark what to cache by adding a `cachePoint` block. Everything
+**before** the cache point is cached; anything **after** it is not.
+
+```python
+user_message = {
+    "role": "user",
+    "content": [
+        {"text": "<long content>"},
+        {"cachePoint": {"type": "default"}},
+    ],
+}
+```
+
+### How cache points work
+
+- **Initial request:** Claude processes everything and stores the work up to the cache point.
+- **Follow-up request:** if the content before the cache point is **exactly the same**, it's read from
+  the cache instead of processed again.
+
+Any change before the cache point, however small (e.g. adding "Please" at the start of the prompt),
+means a cache miss and everything is processed from scratch.
+
+| Request 2 vs request 1 (before the cache point) | Result |
+|---|---|
+| Identical | ✅ Cache read |
+| Same text + "Please" at the start | ❌ Miss, full processing |
+| Identical, only content **after** the cache point changes | ✅ Cache read for the prefix |
+
+### Caching across messages
+
+A cache point can cover **several messages**, including assistant ones: you can cache a whole
+conversation up to a point.
+
+```mermaid
+flowchart LR
+    A[user message] --> B[assistant message] --> C[user message] --> D((cachePoint))
+    D --> E[new content, not cached]
+    style D fill:#f9d77e
+```
+
+### Minimum length
+
+The cached content (sum of **all** messages and parts before the cache point) must be at least
+**1024 tokens**. `"Hi there!"` is not cached; `"Hi there!"` repeated 500 times is.
+
+> Not in the lesson: the minimum depends on the model (1024 for Sonnet/Opus, 2048 for some Haiku models;
+> check your model). Below it there's **no error**: the cache point is just ignored.
+
+### Where to put cache points
+
+Not only in user messages: **system prompts** and **tool definitions** are the most common (and most
+valuable) places, because they rarely change between requests.
+
+```python
+# Tools: cache point at the end of the tool list
+tools = [
+    {"toolSpec": add_duration_to_datetime_schema},
+    {"toolSpec": get_current_datetime_schema},
+    {"cachePoint": {"type": "default"}},
+]
+
+# System prompt
+system = [
+    {"text": "You are a senior software..."},
+    {"cachePoint": {"type": "default"}},
+]
+```
+
+> Not in the lesson (Claude/Bedrock docs):
+> - The prefix is built in this order: **tools → system → messages**. A change in tools invalidates the
+>   cache for the system prompt and messages too → put stable content first and variable content last.
+> - There's a maximum number of cache points per request (4 on most models).
+> - The response `usage` shows if it worked: `cacheWriteInputTokens` (written) and
+>   `cacheReadInputTokens` (read).
+
+```mermaid
+flowchart LR
+    T[tools] --> S[system] --> M[messages]
+    T -.- P1((cachePoint))
+    S -.- P2((cachePoint))
+    M -.- P3((cachePoint))
+```
 
 ---
 
