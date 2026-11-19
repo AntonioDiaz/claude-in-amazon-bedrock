@@ -9,6 +9,11 @@
   - [Redacted thinking](#redacted-thinking)
   - [Implementation](#implementation)
 - [2. Image support](#2-image-support)
+  - [Limits](#limits)
+  - [Sending an image](#sending-an-image)
+  - [Multiple images](#multiple-images)
+  - [Prompting techniques](#prompting-techniques)
+  - [Example: fire risk assessment](#example-fire-risk-assessment)
 - [3. PDF support](#3-pdf-support)
 - [4. Citations](#4-citations)
 - [5. Prompt caching](#5-prompt-caching)
@@ -25,6 +30,8 @@ like seeing Claude's internal monologue: how it breaks the problem down, what it
 reaches the answer. Very useful to understand and debug complex tasks.
 
 ### Response with thinking
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/475840ea-2dd2-4dde-b04b-910318a7176c" />
 
 With thinking enabled, the assistant message has **two parts** instead of one:
 
@@ -150,7 +157,118 @@ result["parts"]
 
 ## 2. Image support
 
-_Pending._
+With **vision**, you can add images to your messages and ask Claude to describe, analyze, compare, count
+objects… practically any visual task. Useful for document analysis, automated inspections and so on.
+
+### Limits
+
+| Limit | Value |
+|---|---|
+| Images per request | Up to **20** (counting all messages) |
+| Max size per image | **3.75 MB** |
+| Max width / height | **8000 px** |
+| Token cost | `tokens ≈ (width px × height px) / 750` |
+
+E.g. a 1000×1000 px image ≈ 1,333 tokens.
+
+> Not in the lesson: the supported formats are `png`, `jpeg`, `gif` and `webp`. Images whose long edge is
+> above ~1568 px are downscaled before processing, so sending bigger ones adds latency without improving
+> the result.
+
+### Sending an image
+
+An image is just another content block in the user message: one `image` block per image, usually
+followed by the `text` block with the question. On Bedrock you send the **raw bytes** (no base64, boto3
+encodes them).
+
+```python
+with open("image.png", "rb") as f:
+    image_bytes = f.read()
+
+add_user_message(messages, [
+    {"image": {"format": "png", "source": {"bytes": image_bytes}}},
+    {"text": "What do you see in this image?"},
+])
+```
+
+### Multiple images
+
+Add several `image` blocks to the same message and Claude can compare them, find relationships between
+them or answer questions that need all of them.
+
+```python
+add_user_message(messages, [
+    {"text": "Image 1:"},
+    {"image": {"format": "png", "source": {"bytes": img1}}},
+    {"text": "Image 2:"},
+    {"image": {"format": "png", "source": {"bytes": img2}}},
+    {"text": "What are the differences between these two images?"},
+])
+```
+
+> Not in the lesson: labelling each image with a short text block before it ("Image 1:", "Image 2:")
+> makes it easier to refer to them in the question and in the answer.
+
+### Prompting techniques
+
+**Key idea:** all prompt engineering techniques also apply to images. A bare question gives poor results;
+guidelines, analysis steps and examples raise the accuracy a lot.
+
+| Technique | Example |
+|---|---|
+| Simple prompt ❌ | "How many marbles are in this image?" |
+| Step-by-step method ✅ | Identify and number each marble one at a time, then verify by counting again with a different method (row by row from the bottom-left) |
+| One/multi-shot ✅ | Send an example image with its correct analysis first, then the target image |
+
+```text
+Analyze this image of marbles and determine the exact count using this methodology:
+1. Begin by identifying each unique marble one at a time. Assign each a number as you identify it.
+2. Verify your result by counting with a different method. Start from the bottom-left corner and work
+   row by row, from left to right.
+What is the exact, verified number of marbles in this image?
+```
+
+### Example: fire risk assessment
+
+Use case: an insurance company assesses fire risk from **satellite images** instead of sending an
+inspector to each property. The prompt guides Claude through specific steps and a rating scale:
+
+```mermaid
+flowchart LR
+    A[Satellite image] --> B[1. Locate the residence]
+    B --> C[2. Tree density]
+    C --> D[3. Emergency access]
+    D --> E[4. Roof overhang]
+    E --> F[5. Fire risk rating 1-4]
+```
+
+| Rating | Risk | Main signs |
+|---|---|---|
+| 1 | Low | Well-spaced trees, clear access, no branches over the roof |
+| 2 | Moderate | Some clusters with breaks, adequate access, roof overhang < 25% |
+| 3 | High | Connected canopies, narrow/limited access, overhang 25–50% |
+| 4 | Severe | Continuous canopy, obstructed access, overhang > 50% |
+
+The prompt ends asking for one sentence per step and the final numeric rating with a short justification.
+
+```python
+with open("./images/prop3.png", "rb") as f:
+    image_bytes = f.read()
+
+messages = []
+add_user_message(messages, [
+    {"image": {"format": "png", "source": {"bytes": image_bytes}}},
+    {"text": prompt},  # the 5-step fire risk prompt
+])
+
+response = chat(messages)
+response["text"]
+```
+
+> The lesson uses `prop7.png`; the notebook uses `prop3.png`. Unzip `images.zip` into `./images/`
+> before running it.
+
+📓 [002_images.ipynb](exercises/module_6/002_images.ipynb) · [002_images_completed.ipynb](exercises/module_6/002_images_completed.ipynb) · images: [images.zip](exercises/module_6/images.zip)
 
 ---
 
