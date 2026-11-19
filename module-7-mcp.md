@@ -7,6 +7,9 @@
   - [How MCP works](#how-mcp-works)
   - [Common questions](#common-questions)
 - [2. MCP clients](#2-mcp-clients)
+  - [Transport agnostic](#transport-agnostic)
+  - [Message types](#message-types)
+  - [Complete flow](#complete-flow)
 - [3. Project setup](#3-project-setup)
 - [4. Defining tools with MCP](#4-defining-tools-with-mcp)
 - [5. The server inspector](#5-the-server-inspector)
@@ -86,7 +89,73 @@ most of the development work.
 
 ## 2. MCP clients
 
-_TODO_
+The **MCP client** is the bridge between your server (your app) and the MCP servers. It's your access point to
+everything an MCP server offers: it handles the message passing and the protocol details, so your code just asks
+"which tools are there?" and "run this tool".
+
+### Transport agnostic
+
+MCP is **transport agnostic**: client and server can talk over different communication channels.
+
+| Transport | When |
+|---|---|
+| **stdio** (standard input/output) | Most common setup: client and server on the same machine, the server runs as a local process |
+| **HTTP** | Remote servers over the network |
+| Others (WebSockets, custom...) | Possible, the protocol doesn't depend on the channel |
+
+> Note: the lesson mentions HTTP and WebSockets as examples. The official MCP spec currently defines two standard
+> transports: **stdio** and **Streamable HTTP** (which replaced the older HTTP + SSE). WebSockets would be a custom transport.
+
+### Message types
+
+Once connected, client and server exchange messages defined in the MCP spec. The two main pairs:
+
+| Request | Result | Meaning |
+|---|---|---|
+| `ListToolsRequest` | `ListToolsResult` | "What tools do you provide?" → full list of tools (name, description, input schema) |
+| `CallToolRequest` | `CallToolResult` | "Run this tool with these arguments" → the execution result |
+
+### Complete flow
+
+User asks *"What repositories do I have?"*:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant S as Your server
+    participant MC as MCP client
+    participant MS as MCP server
+    participant GH as GitHub
+    participant C as Claude
+
+    U->>S: What repositories do I have?
+    S->>MC: Which tools are available?
+    MC->>MS: ListToolsRequest
+    MS-->>MC: ListToolsResult
+    MC-->>S: Tool list
+    S->>C: Question + tools
+    C-->>S: toolUse (e.g. list_repos)
+    S->>MC: Run list_repos with these args
+    MC->>MS: CallToolRequest
+    MS->>GH: API request
+    GH-->>MS: Repository data
+    MS-->>MC: CallToolResult
+    MC-->>S: Tool result
+    S->>C: toolResult in a follow-up message
+    C-->>S: Your repositories are...
+    S-->>U: Final answer
+```
+
+Compared with plain tool use (Module 4), the loop with Claude is **the same** (`toolUse` → `toolResult`). The
+only change is **who executes the tool**: your server no longer runs the function, it delegates it to the MCP
+server through the client.
+
+| Component | Responsibility |
+|---|---|
+| Your server | App logic, talks to Claude, decides when to list/call tools |
+| MCP client | Protocol and communication with the MCP server |
+| MCP server | Defines and executes the tools, talks to the outside service |
+| Claude | Decides which tool to call and writes the answer |
 
 ---
 
