@@ -27,7 +27,7 @@ prompt caching, the Model Context Protocol (MCP), and agents with Claude Code an
 4. [Tool use (function calling)](module-4-tool-use.md)
 5. [Retrieval Augmented Generation (RAG)](module-5-rag.md)
 6. [Features of Claude](module-6-features-of-claude.md)
-7. Model Context Protocol (MCP)
+7. [Model Context Protocol (MCP)](module-7-mcp.md)
 8. Agents
 9. Wrap up & final assessment
 
