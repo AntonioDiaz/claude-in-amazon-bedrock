@@ -19,7 +19,14 @@
   - [What Claude can do with PDFs](#what-claude-can-do-with-pdfs)
   - [Text only vs full visual understanding](#text-only-vs-full-visual-understanding)
 - [4. Citations](#4-citations)
+  - [Enabling citations](#enabling-citations)
+  - [The response with citations](#the-response-with-citations)
+  - [Why citations matter](#why-citations-matter)
 - [5. Prompt caching](#5-prompt-caching)
+  - [How Claude normally processes a request](#how-claude-normally-processes-a-request)
+  - [The problem](#the-problem)
+  - [The solution](#the-solution)
+  - [Benefits and limitations](#benefits-and-limitations)
 - [6. Rules of prompt caching](#6-rules-of-prompt-caching)
 - [7. Prompt caching in action](#7-prompt-caching-in-action)
 - [Common pitfalls](#common-pitfalls)
@@ -349,13 +356,173 @@ mode each page costs text tokens **plus** image tokens.
 
 ## 4. Citations
 
-_Pending._
+The big problem with answers about a document is **trust**: the user has to believe Claude read it
+correctly. **Citations** solve it by showing exactly where in the source each piece of information
+comes from.
+
+### Enabling citations
+
+Only one extra field in the `document` block: `"citations": {"enabled": True}`.
+
+```python
+with open("./earth.pdf", "rb") as f:
+    file_bytes = f.read()
+
+messages = []
+add_user_message(messages, [
+    {
+        "document": {
+            "format": "pdf",
+            "name": "earth",
+            "source": {"bytes": file_bytes},
+            "citations": {"enabled": True},
+        }
+    },
+    {"text": "How were Earth's atmosphere and oceans formed?"},
+])
+
+response = chat(messages)
+```
+
+> Not in the lesson: on Bedrock Converse, enabling citations also switches the PDF to **full visual
+> understanding** (text + page images), see [lesson 3](#text-only-vs-full-visual-understanding).
+
+### The response with citations
+
+The answer is no longer a single text block. It comes split into several parts:
+
+| Part | Contains |
+|---|---|
+| Text parts | Normal text (sentences that don't need a source) |
+| Citations content parts | A piece of the answer + the citations that support it: document, pages and the exact source text |
+
+> Not in the lesson: the shape on Bedrock Converse (from the Bedrock docs, there's no notebook for this
+> lesson):
+
+```python
+{"citationsContent": {
+    "content": [{"text": "The atmosphere formed from volcanic outgassing..."}],
+    "citations": [{
+        "title": "earth",
+        "sourceContent": [{"text": "exact sentence from the PDF..."}],
+        "location": {"documentPage": {"documentIndex": 0, "start": 5, "end": 6}},
+    }],
+}}
+```
+
+`location` depends on the document type: `documentPage` for PDFs, `documentChar` for plain text,
+`documentChunk` for custom content.
+
+```mermaid
+flowchart LR
+    A[Answer] --> B[text part]
+    A --> C[citationsContent part]
+    C --> D[cited answer text]
+    C --> E[citations]
+    E --> F[document title]
+    E --> G[page range]
+    E --> H[exact source text]
+```
+
+> ⚠️ Not in the lesson: our `chat()` builds `"text"` only from parts with a `text` key, so the cited
+> sentences (inside `citationsContent`) would be **lost**. To get the full answer, join both:
+
+```python
+def response_text(parts):
+    out = []
+    for p in parts:
+        if "text" in p:
+            out.append(p["text"])
+        elif "citationsContent" in p:
+            out += [c["text"] for c in p["citationsContent"]["content"]]
+    return "".join(out)
+```
+
+### Why citations matter
+
+| Benefit | Why |
+|---|---|
+| Verification | Users can check the answer against the source |
+| Confidence | Knowing where the data comes from builds trust |
+| Transparency | Claude's reasoning becomes visible and auditable |
+| Accuracy | Citing encourages more careful extraction |
+
+Especially valuable in professional, academic or research contexts: Claude stops being a black box and
+becomes a research assistant that **shows its work**.
+
+📓 No notebook for this lesson · data: [earth.pdf](exercises/module_6/earth.pdf)
 
 ---
 
 ## 5. Prompt caching
 
-_Pending._
+**Prompt caching** makes responses faster and cheaper by reusing the work Claude already did on the
+same input in previous requests.
+
+### How Claude normally processes a request
+
+Before writing a single output token, Claude does a lot of work on the input:
+
+```mermaid
+flowchart LR
+    A[Prompt] --> B[1. Tokenize]
+    B --> C[2. Embedding per token]
+    C --> D[3. Add context from surrounding text]
+    D --> E[4. Generate output]
+```
+
+Once the response is sent, **all that preprocessing is thrown away**.
+
+### The problem
+
+In a conversation, each new request resends everything: the first message, Claude's answer and the new
+message. Claude has to redo, from scratch, the work it threw away moments ago for the same text.
+
+| Request | Content sent | Work done |
+|---|---|---|
+| 1 | Message A | Process A |
+| 2 | Message A + answer + message B | Process A **again** + answer + B |
+
+### The solution
+
+Instead of throwing the work away, Claude **stores it in a cache**: a lookup table from input content →
+computed result. In the next request, if the same content appears, it reuses the result instead of
+starting over.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant C as Claude
+    participant K as Cache
+    App->>C: Request 1 (long content + question 1)
+    C->>K: Cache write (processed content)
+    C-->>App: Answer 1
+    App->>C: Request 2 (same content + question 2)
+    C->>K: Cache read (hit)
+    K-->>C: Reuse previous work
+    C-->>App: Answer 2 (faster and cheaper)
+```
+
+### Benefits and limitations
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/555cb8c2-26f0-40ff-bd6f-711e3a8edca9" />
+
+| ✅ | ⚠️ |
+|---|---|
+| Requests that use the cache are **cheaper and faster** | The first request **writes** to the cache, later ones **read** from it |
+| Very common pattern: system prompts, history, large documents | The cache lives only **5 minutes** |
+| | Only useful if you resend the **same content** |
+
+Typical use cases: chatbots, document analysis tools, any system that keeps conversation context and
+makes several requests close together.
+
+> Not in the lesson:
+> - Pricing (Claude docs): a cache **write** costs ~25% more than normal input tokens; a cache **read**
+>   costs ~10% of the normal price. It pays off from the second request on.
+> - The 5-minute TTL is **refreshed on every hit**, so an active conversation keeps the cache alive.
+> - What's cached is the model's internal state for the prompt prefix (the attention key/value cache),
+>   not the text itself.
+> - How to mark what gets cached on Bedrock (`cachePoint`) comes in the next two lessons.
 
 ---
 
