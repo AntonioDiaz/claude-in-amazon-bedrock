@@ -32,6 +32,11 @@
   - [MCP schema vs Bedrock schema](#mcp-schema-vs-bedrock-schema)
   - [Testing with Claude](#testing-with-claude)
 - [7. Defining resources](#7-defining-resources)
+  - [Understanding resources](#understanding-resources)
+  - [Direct vs templated resources](#direct-vs-templated-resources)
+  - [Implementing resources](#implementing-resources)
+  - [Testing in the inspector](#testing-in-the-inspector)
+  - [Use cases](#use-cases)
 - [8. Accessing resources](#8-accessing-resources)
 - [9. Defining prompts](#9-defining-prompts)
 - [10. Prompts in the client](#10-prompts-in-the-client)
@@ -565,7 +570,94 @@ sequenceDiagram
 
 ## 7. Defining resources
 
-_TODO_
+**Resources** let an MCP server expose **data** to the client, like **GET handlers** in an HTTP server. They
+are for **fetching information**, not for performing actions (that's what tools are for).
+
+### Understanding resources
+
+- **Read-only** endpoints that can return any type of data: strings, JSON, binary files...
+- Each resource is identified by a **URI** (its address).
+- A **`mime_type`** tells the client what kind of data comes back.
+- The client sends a **`ReadResourceRequest`** with the URI → the server answers with a **`ReadResourceResult`**.
+
+```mermaid
+sequenceDiagram
+    participant MC as MCP client
+    participant SV as MCP server
+    MC->>SV: ReadResourceRequest docs://documents/report.pdf
+    SV->>SV: fetch_doc(doc_id=report.pdf)
+    SV-->>MC: ReadResourceResult with content and mime_type
+```
+
+| | Tools | Resources |
+|---|---|---|
+| Purpose | Perform actions (read, edit, call APIs) | Expose data (read-only) |
+| Who decides to use it | **Claude** (model-controlled) | **Your app** (application-controlled) |
+| Request | `CallToolRequest` | `ReadResourceRequest` |
+| HTTP analogy | POST / any action | GET |
+
+### Direct vs templated resources
+
+| Type | URI | Example | Use |
+|---|---|---|---|
+| **Direct** | Static, no parameters | `docs://documents` | List of all document ids |
+| **Templated** | With parameters `{...}` | `docs://documents/{doc_id}` | Content of one document |
+
+In templated resources the SDK **parses the parameters from the URI** and passes them as keyword arguments: the
+name in the URI (`{doc_id}`) must match the function argument name (`doc_id`).
+
+### Implementing resources
+
+With the `@mcp.resource()` decorator:
+
+```python
+@mcp.resource(
+    "docs://documents",
+    mime_type="application/json",
+)
+def list_docs() -> list[str]:
+    return list(docs.keys())
+
+
+@mcp.resource(
+    "docs://documents/{doc_id}",
+    mime_type="text/plain",
+)
+def fetch_doc(doc_id: str) -> str:
+    if doc_id not in docs:
+        raise ValueError(f"Doc with id {doc_id} not found")
+    return docs[doc_id]
+```
+
+The SDK **serializes** whatever you return: just return the Python structure (`list`, `dict`, `str`...), no need
+for `json.dumps()`.
+
+### Testing in the inspector
+
+```bash
+uv run mcp dev mcp_server.py
+```
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/5f8e4d51-9b84-4c88-af0c-b4b97cedeea8" />
+
+The inspector shows the two types separately:
+
+| Inspector section | Contains |
+|---|---|
+| **Resources** | Direct resources (`docs://documents`) |
+| **Resource Templates** | Templated resources (`docs://documents/{doc_id}`); you fill the parameter before reading |
+
+Clicking a resource shows the exact response structure the server returns.
+
+### Use cases
+
+- **Autocomplete** data (e.g. list of documents for `@` mentions).
+- File contents or database records.
+- Configuration data.
+- Any read-only information the client needs.
+
+Key advantage: the client can **fetch data proactively**, without going through Claude and a tool call. That's
+what the `@doc_name` mentions use: the app reads the document and **injects it into the prompt** directly.
 
 ---
 
