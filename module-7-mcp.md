@@ -21,7 +21,16 @@
   - [Edit tool](#edit-tool)
   - [Key points](#key-points)
 - [5. The server inspector](#5-the-server-inspector)
+  - [Starting the inspector](#starting-the-inspector)
+  - [Using the interface](#using-the-interface)
+  - [Testing the document tools](#testing-the-document-tools)
+  - [Development loop](#development-loop)
 - [6. Implementing a client](#6-implementing-a-client)
+  - [Client architecture](#client-architecture)
+  - [The wrapper class](#the-wrapper-class)
+  - [`list_tools` and `call_tool`](#list_tools-and-call_tool)
+  - [MCP schema vs Bedrock schema](#mcp-schema-vs-bedrock-schema)
+  - [Testing with Claude](#testing-with-claude)
 - [7. Defining resources](#7-defining-resources)
 - [8. Accessing resources](#8-accessing-resources)
 - [9. Defining prompts](#9-defining-prompts)
@@ -335,13 +344,222 @@ def edit_document(
 
 ## 5. The server inspector
 
-_TODO_
+To test an MCP server **without wiring it to a full app**, the Python SDK includes a browser-based
+**MCP Inspector** to debug and try the server in real time.
+
+### Starting the inspector
+
+With the project's Python environment activated:
+
+```bash
+mcp dev mcp_server.py
+```
+
+It starts a development server and prints a local URL to open in the browser.
+
+> Note (not in the lesson): `mcp dev` needs the SDK with the CLI extra (`pip install "mcp[cli]"`) and
+> **Node.js**, because the inspector is a Node app launched with `npx`. The lesson says the URL is "typically on
+> port 6277"; in current versions **6274** is the web UI and **6277** is the proxy that talks to your server. Use
+> the URL printed in the terminal (it may include an auth token).
+
+### Using the interface
+
+The UI changes often, but the flow is the same:
+
+```mermaid
+flowchart LR
+    A[mcp dev mcp_server.py] --> B[Open URL in browser]
+    B --> C[Connect - starts the server]
+    C --> D[Tools tab - List Tools]
+    D --> E[Select a tool and fill the form]
+    E --> F[Run Tool - see result]
+```
+
+| Step | What to do |
+|---|---|
+| **Connect** | Button on the left: starts the MCP server and loads its capabilities |
+| **Navigation bar** | Tabs **Resources**, **Prompts**, **Tools** (one per primitive) |
+| **List Tools** | Shows every tool the server exposes (the `ListToolsRequest`) |
+| **Select a tool** | The right panel shows a form generated from its input schema |
+| **Run Tool** | Runs it (the `CallToolRequest`) and shows status + returned data |
+
+### Testing the document tools
+
+- **Read**: select `read_doc_contents`, `doc_id` = `deposition.md` → Run Tool → the document content.
+- **Edit**: select `edit_document`, fill `doc_id`, `old_str`, `new_str` → Run Tool → then run
+  `read_doc_contents` again to check the change was applied.
+
+### Development loop
+
+The left side keeps a **history** of tool calls, so it's easy to see what you tested and repeat calls.
+
+1. Change the server code.
+2. Restart the inspector (reconnect).
+3. Test the tools right away.
+4. Verify the results.
+
+Testing with the inspector **before** building the client separates server bugs from client bugs.
 
 ---
 
 ## 6. Implementing a client
 
-_TODO_
+With the server working, the next step is the **client**: the part of the app that talks to the MCP server and
+gives Claude access to its tools.
+
+### Client architecture
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/f50e52cc-eace-4b67-8e5c-8752bd8f70d3" />
+
+The client has two layers:
+
+| Layer | What it is |
+|---|---|
+| **`MCPClient`** | Our own class that wraps the session to make it easier to use and to **clean up resources** on shutdown |
+| **`ClientSession`** | The real connection to the server (from the MCP Python SDK); handles the low-level communication |
+
+```mermaid
+flowchart LR
+    CLI[CLI chat code] --> MC[MCPClient wrapper]
+    MC --> CS[ClientSession - SDK]
+    CS <-->|stdio| SV[MCP server]
+    CLI <--> C[Claude on Bedrock]
+```
+
+The CLI uses the client at **two moments**:
+
+1. **List the tools** to send them to Claude with the request.
+2. **Execute a tool** when Claude asks for one (`toolUse`).
+
+### The wrapper class
+
+The starter project already includes the wrapper; roughly it looks like this (my simplified version, the lesson
+only shows the two methods below):
+
+```python
+from contextlib import AsyncExitStack
+from mcp import ClientSession, StdioServerParameters, types
+from mcp.client.stdio import stdio_client
+
+
+class MCPClient:
+    def __init__(self, command: str, args: list[str], env: dict | None = None):
+        self._command, self._args, self._env = command, args, env
+        self._session: ClientSession | None = None
+        self._exit_stack = AsyncExitStack()
+
+    async def connect(self):
+        params = StdioServerParameters(command=self._command, args=self._args, env=self._env)
+        read, write = await self._exit_stack.enter_async_context(stdio_client(params))
+        self._session = await self._exit_stack.enter_async_context(ClientSession(read, write))
+        await self._session.initialize()
+
+    def session(self) -> ClientSession:
+        if self._session is None:
+            raise ConnectionError("Client session not initialized. Call connect() first.")
+        return self._session
+
+    async def cleanup(self):
+        await self._exit_stack.aclose()
+        self._session = None
+
+    async def __aenter__(self):
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *exc):
+        await self.cleanup()
+```
+
+The `AsyncExitStack` is what gives the "automatic cleanup": it closes the session and stops the server process
+when the client exits.
+
+### `list_tools` and `call_tool`
+
+The two methods we implement just delegate to the session:
+
+```python
+async def list_tools(self) -> list[types.Tool]:
+    result = await self.session().list_tools()        # ListToolsRequest
+    return result.tools
+
+async def call_tool(self, tool_name: str, tool_input: dict) -> types.CallToolResult | None:
+    return await self.session().call_tool(tool_name, tool_input)   # CallToolRequest
+```
+
+Quick test with the harness at the bottom of the file (connects and prints the tools: name, description,
+input schema):
+
+```bash
+uv run mcp_client.py
+```
+
+### MCP schema vs Bedrock schema
+
+MCP tool definitions **don't match exactly** what Bedrock Converse expects, so they must be converted. The
+project already does it in `to_bedrock_tools()` (`core/bedrock.py`).
+
+| MCP `types.Tool` | Bedrock Converse `toolConfig.tools[]` |
+|---|---|
+| `name` | `toolSpec.name` |
+| `description` | `toolSpec.description` |
+| `inputSchema` (JSON schema) | `toolSpec.inputSchema.json` |
+
+Conversion in both directions (my version; the project's code may differ in details):
+
+```python
+def to_bedrock_tools(mcp_tools: list[types.Tool]) -> list[dict]:
+    return [
+        {
+            "toolSpec": {
+                "name": t.name,
+                "description": t.description or "",
+                "inputSchema": {"json": t.inputSchema},
+            }
+        }
+        for t in mcp_tools
+    ]
+
+
+def to_bedrock_tool_result(tool_use_id: str, result: types.CallToolResult) -> dict:
+    return {
+        "toolResult": {
+            "toolUseId": tool_use_id,
+            "content": [{"text": c.text} for c in result.content if c.type == "text"],
+            "status": "error" if result.isError else "success",
+        }
+    }
+```
+
+### Testing with Claude
+
+```bash
+uv run main.py
+```
+
+Ask *"What is the contents of the report.pdf document?"*:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant App as CLI app
+    participant MC as MCPClient
+    participant SV as MCP server
+    participant C as Claude
+
+    U->>App: What is the contents of report.pdf?
+    App->>MC: list_tools()
+    MC->>SV: ListToolsRequest
+    SV-->>MC: tools
+    App->>C: converse(messages, toolConfig from to_bedrock_tools)
+    C-->>App: toolUse read_doc_contents(doc_id=report.pdf)
+    App->>MC: call_tool(read_doc_contents, input)
+    MC->>SV: CallToolRequest
+    SV-->>MC: CallToolResult
+    App->>C: toolResult with the content
+    C-->>App: The report details...
+    App-->>U: answer
+```
 
 ---
 
