@@ -44,6 +44,10 @@
   - [Testing](#testing)
   - [Resources vs tools to read data](#resources-vs-tools-to-read-data)
 - [9. Defining prompts](#9-defining-prompts)
+  - [Why prompts](#why-prompts)
+  - [Defining a prompt](#defining-a-prompt)
+  - [The format prompt](#the-format-prompt)
+  - [Testing in the inspector](#testing-in-the-inspector-1)
 - [10. Prompts in the client](#10-prompts-in-the-client)
 - [11. MCP review](#11-mcp-review)
 - [Common pitfalls](#common-pitfalls)
@@ -777,7 +781,83 @@ Claude gets the document right away, without extra tool calls.
 
 ## 9. Defining prompts
 
-_TODO_
+MCP servers can also define **prompts**: pre-written, well-tested instructions that clients can use instead of
+writing their own from scratch. Templates crafted by the server author that give better results than what a
+user would improvise.
+
+### Why prompts
+
+Asking *"Convert report.pdf to markdown"* works, but a **detailed, tested prompt** that covers edge cases and gives
+precise formatting instructions works much better. The server author spends time on prompt engineering (and
+evals, Module 2) once, and every user of the server benefits without being an expert.
+
+| Benefit | Meaning |
+|---|---|
+| **Quality control** | The author tests and refines the prompt before users see it |
+| **Consistency** | Everyone gets the same good prompt instead of improvising |
+| **Specialization** | Tailored to the server's domain and its tools |
+| **Reusability** | Many client apps can use the same prompt |
+
+### Defining a prompt
+
+Same decorator pattern as tools and resources: `@mcp.prompt`. The function returns a **list of messages** ready to
+send to Claude, so it can include several user/assistant turns if needed.
+
+```python
+from mcp.server.fastmcp.prompts import base
+```
+
+### The format prompt
+
+For the document server, a `/format` prompt that rewrites a document in Markdown. It must:
+
+1. Take a document id as input.
+2. Use `read_doc_contents` to get the document.
+3. Reformat it with Markdown syntax.
+4. Save the changes with `edit_document`.
+
+```python
+@mcp.prompt(
+    name="format",
+    description="Rewrites the contents of the document in Markdown format.",
+)
+def format_document(
+    doc_id: str = Field(description="Id of the document to format"),
+) -> list[base.Message]:
+    prompt = f"""
+Your goal is to reformat a document to be written with markdown syntax.
+
+The id of the document you need to reformat is:
+<document_id>
+{doc_id}
+</document_id>
+
+Add in headers, bullet points, tables, etc as necessary. Feel free to add in structure.
+Use the 'edit_document' tool to edit the document. After the document has been reformatted,
+respond with a short summary of the changes you made.
+"""
+    return [base.UserMessage(prompt)]
+```
+
+> Note: the lesson shows the decorator and the body in two separate snippets and cuts the prompt text
+> ("After the document has been reformatted..."). I joined them, finished the last sentence and wrapped the id in
+> an XML tag (Module 3).
+
+The prompt **relies on the server's tools**: the prompt is the "what to do", the tools are the "how".
+
+| Primitive | Decorator | Returns |
+|---|---|---|
+| Tool | `@mcp.tool` | The result of an action |
+| Resource | `@mcp.resource` | Data (JSON, text, binary) |
+| Prompt | `@mcp.prompt` | A list of messages (`base.UserMessage`, `base.AssistantMessage`) |
+
+### Testing in the inspector
+
+**Prompts** tab → select `format` → fill `doc_id` → the inspector shows the **generated messages** that would be
+sent to Claude. Useful to check that the parameters are interpolated correctly and that the prompt contains all
+the instructions.
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/d94f30ac-8ff3-43d7-848b-b873471b8467" />
 
 ---
 
