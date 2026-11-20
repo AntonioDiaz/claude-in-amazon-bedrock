@@ -11,6 +11,9 @@
   - [Message types](#message-types)
   - [Complete flow](#complete-flow)
 - [3. Project setup](#3-project-setup)
+  - [What we're building](#what-were-building)
+  - [Architecture](#architecture)
+  - [Client or server, not both](#client-or-server-not-both)
 - [4. Defining tools with MCP](#4-defining-tools-with-mcp)
 - [5. The server inspector](#5-the-server-inspector)
 - [6. Implementing a client](#6-implementing-a-client)
@@ -161,7 +164,58 @@ server through the client.
 
 ## 3. Project setup
 
-_TODO_
+To see how clients and servers work together, the module builds a **CLI chatbot** that lets the user chat with
+a set of documents. The project includes **both sides** of MCP: a client and a server.
+
+### What we're building
+
+| Feature | Description |
+|---|---|
+| CLI chat | Command-line chat interface with Claude |
+| Read / edit documents | Claude can read and update documents through tools |
+| Mentions `@doc_name` | The user references a document and its content goes into the prompt |
+| Commands `/command_name` | The user runs a pre-built prompt (e.g. `/format`) |
+| Fake documents | Stored **in memory** (PDFs, spreadsheets, text, markdown), no files on disk |
+
+### Architecture
+
+| Component | Role |
+|---|---|
+| **MCP client** | User interaction and chat interface; talks to Claude and to the MCP server |
+| **MCP server** | Exposes the document operations |
+| **Document storage** | In-memory dict with the documents |
+
+The server implements two core tools:
+
+- **Read** the contents of a document.
+- **Update** the contents of a document.
+
+```mermaid
+flowchart LR
+    U[User in CLI] --> CL[MCP client - chat app]
+    CL <--> C[Claude on Bedrock]
+    CL <-->|stdio| SV[MCP server - DocumentMCP]
+    SV --> D[(In-memory docs)]
+```
+
+Mapping each feature to the MCP primitive used later in the module:
+
+| Feature | MCP primitive | Section |
+|---|---|---|
+| Read / edit documents | Tools | [4](#4-defining-tools-with-mcp), [6](#6-implementing-a-client) |
+| `@doc_name` mentions | Resources | [7](#7-defining-resources), [8](#8-accessing-resources) |
+| `/command_name` commands | Prompts | [9](#9-defining-prompts), [10](#10-prompts-in-the-client) |
+
+### Client or server, not both
+
+In real projects you normally build **one side only**:
+
+- An **MCP server** → to offer your service to other developers / apps.
+- An **MCP client** → to connect your app to existing third-party MCP servers.
+
+This project has both in the same codebase **only to learn** how they interact.
+
+Course downloads: `cli_starter.zip` (starting point) and `cli_project_complete.zip` (final solution).
 
 ---
 
