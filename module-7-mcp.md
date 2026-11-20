@@ -38,6 +38,11 @@
   - [Testing in the inspector](#testing-in-the-inspector)
   - [Use cases](#use-cases)
 - [8. Accessing resources](#8-accessing-resources)
+  - [Resource flow](#resource-flow)
+  - [Implementing `read_resource`](#implementing-read_resource)
+  - [Injecting the resource into the prompt](#injecting-the-resource-into-the-prompt)
+  - [Testing](#testing)
+  - [Resources vs tools to read data](#resources-vs-tools-to-read-data)
 - [9. Defining prompts](#9-defining-prompts)
 - [10. Prompts in the client](#10-prompts-in-the-client)
 - [11. MCP review](#11-mcp-review)
@@ -663,7 +668,110 @@ what the `@doc_name` mentions use: the app reads the document and **injects it i
 
 ## 8. Accessing resources
 
-_TODO_
+Resources let the app put server data **straight into the prompt**, instead of Claude needing a tool call to get
+it. A more efficient way to give Claude context.
+
+### Resource flow
+
+When the user types `@` in the CLI, the app needs the list of documents for **autocomplete**, and then the
+content of the chosen one:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant App as CLI app
+    participant MC as MCPClient
+    participant SV as MCP server
+    participant C as Claude
+
+    U->>App: types What's in the @...
+    App->>MC: read_resource(docs://documents)
+    MC->>SV: ReadResourceRequest
+    SV-->>MC: list of doc ids (JSON)
+    App-->>U: autocomplete list
+    U->>App: picks report.pdf and sends the question
+    App->>MC: read_resource(docs://documents/report.pdf)
+    MC->>SV: ReadResourceRequest
+    SV-->>MC: document text
+    App->>C: prompt with the question + document content
+    C-->>App: answer (no tool call needed)
+```
+
+### Implementing `read_resource`
+
+In the `MCPClient` class. Imports:
+
+```python
+import json
+from typing import Any
+from pydantic import AnyUrl
+from mcp import types
+```
+
+The method asks the server for the URI and processes the first content according to its MIME type:
+
+```python
+async def read_resource(self, uri: str) -> Any:
+    result = await self.session().read_resource(AnyUrl(uri))   # ReadResourceRequest
+    resource = result.contents[0]
+
+    if isinstance(resource, types.TextResourceContents):
+        if resource.mimeType == "application/json":
+            return json.loads(resource.text)     # docs://documents -> list[str]
+        return resource.text                     # docs://documents/{id} -> str
+
+    return resource.blob                         # BlobResourceContents (binary, base64)
+```
+
+| Content type | SDK class | Field | What we return |
+|---|---|---|---|
+| `application/json` | `TextResourceContents` | `text` | Parsed Python object (`json.loads`) |
+| `text/plain` | `TextResourceContents` | `text` | The string as-is |
+| Binary (images, PDFs...) | `BlobResourceContents` | `blob` (base64) | The base64 data |
+
+> Note: the lesson's code returns `resource.text` for every case and doesn't import `Any`. A
+> `BlobResourceContents` has no `text`, so I added the `blob` branch. Not needed for this project (all docs are
+> text), but it avoids an `AttributeError` with binary resources.
+
+### Injecting the resource into the prompt
+
+The lesson doesn't show this part (it's in the starter code). Roughly, the CLI adds the mentioned documents to
+the user message in Converse format:
+
+```python
+async def build_user_message(client: MCPClient, query: str, mentioned_ids: list[str]) -> dict:
+    docs_xml = ""
+    for doc_id in mentioned_ids:
+        content = await client.read_resource(f"docs://documents/{doc_id}")
+        docs_xml += f'<document id="{doc_id}">\n{content}\n</document>\n'
+
+    prompt = f"""The user has mentioned these documents:
+<documents>
+{docs_xml}</documents>
+
+{query}"""
+    return {"role": "user", "content": [{"text": prompt}]}
+```
+
+### Testing
+
+Run the CLI and type `@`:
+
+1. The autocomplete list shows the available documents.
+2. Select one with the arrow keys and space.
+3. Its content goes **directly in the prompt** sent to Claude.
+
+Claude gets the document right away, without extra tool calls.
+
+### Resources vs tools to read data
+
+| | Reading with a tool (`read_doc_contents`) | Reading with a resource (`@report.pdf`) |
+|---|---|---|
+| Who decides | Claude | User / app |
+| Calls to Claude | 2+ (toolUse → toolResult → answer) | 1 |
+| Latency and tokens | Higher | Lower |
+| UX | Claude must guess which doc | Autocomplete, user picks it |
+| Best for | Dynamic operations | Relatively static info: docs, reports, reference material |
 
 ---
 
