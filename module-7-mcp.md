@@ -49,7 +49,15 @@
   - [The format prompt](#the-format-prompt)
   - [Testing in the inspector](#testing-in-the-inspector-1)
 - [10. Prompts in the client](#10-prompts-in-the-client)
+  - [`list_prompts` and `get_prompt`](#list_prompts-and-get_prompt)
+  - [Converting to Bedrock messages](#converting-to-bedrock-messages)
+  - [Testing: the `/format` command](#testing-the-format-command)
+  - [How prompts work](#how-prompts-work)
 - [11. MCP review](#11-mcp-review)
+  - [Tools: model-controlled](#tools-model-controlled)
+  - [Resources: app-controlled](#resources-app-controlled)
+  - [Prompts: user-controlled](#prompts-user-controlled)
+  - [Choosing the right primitive](#choosing-the-right-primitive)
 - [Common pitfalls](#common-pitfalls)
 
 ---
@@ -863,19 +871,173 @@ the instructions.
 
 ## 10. Prompts in the client
 
-_TODO_
+Last piece of the client: **list** the server's prompts and **get** a specific one with its arguments
+interpolated.
+
+### `list_prompts` and `get_prompt`
+
+```python
+async def list_prompts(self) -> list[types.Prompt]:
+    result = await self.session().list_prompts()                 # ListPromptsRequest
+    return result.prompts
+
+
+async def get_prompt(self, prompt_name: str, args: dict[str, str]):
+    result = await self.session().get_prompt(prompt_name, args)  # GetPromptRequest
+    return result.messages                                       # list[types.PromptMessage]
+```
+
+- `list_prompts()` → name, description and arguments of each prompt (used to show the `/` commands).
+- `get_prompt()` → the args are passed as **keyword arguments** to the prompt function on the server
+  (`{"doc_id": "report.pdf"}` → `format_document(doc_id="report.pdf")`), and it returns the messages ready for Claude.
+
+> Note: prompt arguments in MCP are **strings** (`dict[str, str]`), unlike tool inputs, which follow a JSON schema
+> with any type.
+
+### Converting to Bedrock messages
+
+The lesson says the messages go "directly" to Claude, but `PromptMessage` (`role` + `content`) isn't the Converse
+format. A conversion like this is needed (my version):
+
+```python
+def to_bedrock_messages(prompt_messages: list[types.PromptMessage]) -> list[dict]:
+    messages = []
+    for m in prompt_messages:
+        if isinstance(m.content, types.TextContent):
+            messages.append({"role": m.role, "content": [{"text": m.content.text}]})
+    return messages
+```
+
+### Testing: the `/format` command
+
+Typing `/` in the CLI lists the prompts as commands; choosing `format` asks for a document:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant App as CLI app
+    participant MC as MCPClient
+    participant SV as MCP server
+    participant C as Claude
+
+    U->>App: /format report.pdf
+    App->>MC: get_prompt(format, doc_id=report.pdf)
+    MC->>SV: GetPromptRequest
+    SV-->>MC: messages with doc_id interpolated
+    App->>C: prompt messages as user message + tools
+    C-->>App: toolUse read_doc_contents
+    App->>MC: call_tool(...)
+    MC-->>App: document content
+    App->>C: toolResult
+    C-->>App: toolUse edit_document
+    App->>MC: call_tool(...)
+    App->>C: toolResult
+    C-->>App: summary of the reformatted document
+    App-->>U: answer
+```
+
+Unlike a `@` mention, the prompt only carries the **document id**: Claude fetches the content itself with the tools.
+
+### How prompts work
+
+Prompts are sets of **user/assistant messages** that the server offers to clients; they should be high quality,
+tested and relevant to the server's purpose.
+
+1. Write and **evaluate** a prompt related to the server's purpose.
+2. Define it in the server with `@mcp.prompt`.
+3. The client can request it at any time.
+4. When requesting it, it passes arguments → keyword arguments of the function.
+5. The function uses them to customize the prompt content.
+
+Result: reusable, parameterized prompts shared across different clients.
 
 ---
 
 ## 11. MCP review
 
-_TODO_
+Recap of the three server primitives. Key idea: **each one is controlled by a different part of the app stack**.
+
+```mermaid
+flowchart TB
+    subgraph Server[MCP server]
+        T[Tools]
+        R[Resources]
+        P[Prompts]
+    end
+    M[Claude - the model] -->|decides to call| T
+    A[Your app code] -->|decides to fetch| R
+    U[User] -->|decides to trigger| P
+```
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/9d02c562-17f9-4871-a127-537fad34491d" />
+
+### Tools: model-controlled
+
+**Claude** decides when to call them, and Claude uses the results to complete the task.
+
+- Use them to **give Claude new capabilities**.
+- Example: *"Calculate the square root of 3 using JavaScript"* → Claude decides by itself to use a JavaScript
+  execution tool. Neither the app nor the user told it to: 100% model-controlled.
+- In our project: `read_doc_contents`, `edit_document`.
+
+### Resources: app-controlled
+
+**Your app code** decides when to fetch the data and what to do with it: UI or adding context to the conversation.
+
+- Use them to **get data into your app**:
+  - Autocomplete options in the UI.
+  - Documents for a file picker.
+  - Context added to messages before sending them to Claude.
+- Example: **"Add from Google Drive"** in Claude's web UI: the app lists the documents, shows them, and injects the
+  selected one into the chat context.
+- In our project: `docs://documents` (autocomplete) and `docs://documents/{doc_id}` (`@` mentions).
+
+### Prompts: user-controlled
+
+The **user** decides when to trigger these predefined workflows: buttons, menu options, slash commands.
+
+- Use them to offer **predefined workflows** that are easy to access.
+- Example: the workflow buttons under the chat input in Claude's UI (write, learn, code...).
+- In our project: `/format`.
+
+### Choosing the right primitive
+
+| Need | Primitive | Controlled by | Serves | Project example |
+|---|---|---|---|---|
+| Extend Claude's capabilities | **Tools** | Model | Claude | `read_doc_contents`, `edit_document` |
+| Get data into the app / UI | **Resources** | App | Your app | `docs://documents`, `@report.pdf` |
+| Offer predefined workflows | **Prompts** | User | Users | `/format` |
+
+Summary of the client methods and protocol messages seen in the module:
+
+| Primitive | List | Use |
+|---|---|---|
+| Tools | `list_tools()` → `ListToolsRequest` | `call_tool()` → `CallToolRequest` |
+| Resources | `list_resources()` / `list_resource_templates()` | `read_resource()` → `ReadResourceRequest` |
+| Prompts | `list_prompts()` → `ListPromptsRequest` | `get_prompt()` → `GetPromptRequest` |
+
+> Note: `list_resources()` / `list_resource_templates()` aren't used in the lesson (the app reads
+> `docs://documents` directly), but they exist in the SDK's `ClientSession` to discover resources.
 
 ---
 
 ## Common pitfalls
 
-_TODO_
+- Thinking MCP replaces tool use → it doesn't: the Claude loop (`toolUse` → `toolResult`) is the same, MCP only changes **who** defines and runs the tools.
+- Building client **and** server in a real project → normally you build only one side; the course does both just to learn.
+- Vague tool names / descriptions or missing `Field(description=...)` → the generated schema is poor and Claude doesn't pick the tool or fills the arguments wrong.
+- `edit_document` with `str.replace()` → replaces every occurrence, does nothing silently if `old_str` isn't found, and returns nothing; validate and return a confirmation.
+- `mcp dev` failing → missing `mcp[cli]` or Node.js; and open the URL printed in the terminal (UI on 6274, proxy on 6277).
+- Debugging the client before the server → test the server first with the **inspector**.
+- Passing MCP tools straight to Converse → the format differs; convert with `to_bedrock_tools()` (`inputSchema` → `toolSpec.inputSchema.json`).
+- Sending `CallToolResult` as-is → convert it to a `toolResult` block, and set `status: "error"` when `isError` is true.
+- Forgetting the cleanup of the `ClientSession` → server processes left running; use the wrapper with `AsyncExitStack` / `async with`.
+- Templated resource with a URI parameter name that differs from the function argument (`{doc_id}` vs `id`) → the SDK can't map it.
+- Calling `json.dumps()` in a resource → the SDK already serializes; return the Python object.
+- `read_resource` that only handles `text` → breaks on `BlobResourceContents`; check the content type and `mimeType`.
+- Prompt arguments that aren't strings → MCP prompt args are `dict[str, str]`.
+- Sending `PromptMessage` straight to Converse → convert to `{"role", "content": [{"text"}]}`.
+- Confusing who controls what: tools → **model**, resources → **app**, prompts → **user**.
 
 ---
 
