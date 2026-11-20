@@ -15,6 +15,11 @@
   - [Architecture](#architecture)
   - [Client or server, not both](#client-or-server-not-both)
 - [4. Defining tools with MCP](#4-defining-tools-with-mcp)
+  - [Why the Python SDK](#why-the-python-sdk)
+  - [Server setup](#server-setup)
+  - [Read tool](#read-tool)
+  - [Edit tool](#edit-tool)
+  - [Key points](#key-points)
 - [5. The server inspector](#5-the-server-inspector)
 - [6. Implementing a client](#6-implementing-a-client)
 - [7. Defining resources](#7-defining-resources)
@@ -221,7 +226,110 @@ Course downloads: `cli_starter.zip` (starting point) and `cli_project_complete.z
 
 ## 4. Defining tools with MCP
 
-_TODO_
+The official **MCP Python SDK** makes building a server much simpler: instead of writing JSON schemas by hand
+(as in Module 4), you define tools as **decorated Python functions** and the SDK generates the schema.
+
+### Why the Python SDK
+
+- Minimal boilerplate to create a server.
+- **JSON schema generated automatically** from the function signature (type hints + `Field` descriptions).
+- Tools defined with a decorator: `@mcp.tool`.
+- Type validation and error handling built in.
+
+| | Plain tool use (Module 4) | MCP Python SDK |
+|---|---|---|
+| Schema | Written by hand (`toolSpec` → `inputSchema.json`) | Generated from the function signature |
+| Parameter descriptions | Inside the JSON schema | `Field(description=...)` |
+| Execution | Your app runs the function | The MCP server runs it |
+
+### Server setup
+
+The server is a `FastMCP` instance; the documents live in an in-memory dict (`doc_id` → content).
+
+```python
+from mcp.server.fastmcp import FastMCP
+from pydantic import Field
+
+mcp = FastMCP("DocumentMCP", log_level="ERROR")
+
+docs = {
+    "deposition.md": "This deposition covers the testimony of Angela Smith, P.E.",
+    "report.pdf": "The report details the state of a 20m condenser tower.",
+    "financials.docx": "These financials outline the project's budget and expenditures",
+    "outlook.pdf": "This document presents the projected future performance of the system",
+    "plan.md": "The plan outlines the steps for the project's implementation.",
+    "spec.txt": "These specifications define the technical requirements for the equipment",
+}
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+```
+
+### Read tool
+
+```python
+@mcp.tool(
+    name="read_doc_contents",
+    description="Read the contents of a document and return it as a string.",
+)
+def read_document(
+    doc_id: str = Field(description="Id of the document to read"),
+):
+    if doc_id not in docs:
+        raise ValueError(f"Doc with id {doc_id} not found")
+    return docs[doc_id]
+```
+
+What the SDK publishes for it in `ListToolsResult` (roughly):
+
+```json
+{
+  "name": "read_doc_contents",
+  "description": "Read the contents of a document and return it as a string.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "doc_id": {"type": "string", "description": "Id of the document to read"}
+    },
+    "required": ["doc_id"]
+  }
+}
+```
+
+It's the same shape as a Converse `toolSpec` (`name`, `description`, input schema), which is why the client can
+convert MCP tools to `toolConfig` easily (section [6](#6-implementing-a-client)).
+
+### Edit tool
+
+A simple find-and-replace over the document content:
+
+```python
+@mcp.tool(
+    name="edit_document",
+    description="Edit a document by replacing a string in the documents content with a new string.",
+)
+def edit_document(
+    doc_id: str = Field(description="Id of the document that will be edited"),
+    old_str: str = Field(description="The text to replace. Must match exactly, including whitespace."),
+    new_str: str = Field(description="The new text to insert in place of the old text."),
+):
+    if doc_id not in docs:
+        raise ValueError(f"Doc with id {doc_id} not found")
+    docs[doc_id] = docs[doc_id].replace(old_str, new_str)
+```
+
+> Note (not in the lesson): `str.replace()` replaces **every** occurrence, and if `old_str` isn't found it
+> silently does nothing. The function also returns nothing, so Claude gets an empty result. A sturdier version
+> would check that `old_str` exists and return a confirmation (e.g. `"Document updated"`).
+
+### Key points
+
+| Element | Purpose |
+|---|---|
+| `@mcp.tool(name=..., description=...)` | Registers the tool; clear name and description so Claude knows when to use it |
+| Type hints (`doc_id: str`) | Parameter types in the schema |
+| `Field(description=...)` (pydantic) | Parameter descriptions in the schema |
+| `raise ValueError(...)` | Errors for invalid input; the SDK sends them back to the client as a tool error |
 
 ---
 
