@@ -27,8 +27,23 @@
   - [Merging the changes](#merging-the-changes)
   - [Results](#results)
 - [5. Automated debugging](#5-automated-debugging)
+  - [The problem: production-only errors](#the-problem-production-only-errors)
+  - [Traditional debugging](#traditional-debugging)
+  - [Automated error detection and fixing](#automated-error-detection-and-fixing)
+  - [Real-world example](#real-world-example)
+  - [Benefits](#benefits)
+  - [Implementation considerations](#implementation-considerations)
 - [6. Computer Use](#6-computer-use)
+  - [What Computer Use can do](#what-computer-use-can-do)
+  - [Real-world example: automated QA testing](#real-world-example-automated-qa-testing)
+  - [How the testing process works](#how-the-testing-process-works)
+  - [Setting up Computer Use](#setting-up-computer-use)
+  - [Best practices](#best-practices)
 - [7. How Computer Use works](#7-how-computer-use-works)
+  - [Tool use recap](#tool-use-recap)
+  - [Same flow, different tool](#same-flow-different-tool)
+  - [The technical implementation](#the-technical-implementation)
+  - [Getting started](#getting-started)
 - [8. Qualities of agents](#8-qualities-of-agents)
 - [Common pitfalls](#common-pitfalls)
 
@@ -423,15 +438,338 @@ of instances you run.
 
 ## 5. Automated debugging
 
-<!-- pending -->
+Claude isn't only for writing code in your editor: it can also **watch your production app and fix errors
+automatically**, often before users notice them.
+
+```mermaid
+flowchart LR
+    A[Onboarding] --> B[Specs, tests and code] --> C[Monitor usage] --> D[Debug errors]
+```
+
+### The problem: production-only errors
+
+The classic case: the app works perfectly in development but fails in production.
+
+Example from the lesson: a simple chatbot works locally (answers questions, generates spreadsheets with fake
+data). Deployed on **AWS Amplify**, the same tests run, but spreadsheet generation **fails silently**: the
+request completes, but no data shows up.
+
+### Traditional debugging
+
+| Step | Manual work |
+|---|---|
+| 1 | Search the **CloudWatch** logs for error messages |
+| 2 | Read complex errors and stack traces |
+| 3 | Work out why the code behaves differently in production |
+| 4 | Fix and redeploy |
+
+Slow, especially with cryptic messages like *"The provided model identifier is invalid"* buried in a long log.
+
+### Automated error detection and fixing
+
+Instead, a **GitHub Action** runs every day, checks production and hands the whole debugging process to
+Claude:
+
+```mermaid
+flowchart TD
+    S[1. Setup: checkout repo, install dependencies, configure Claude] --> L[2. AWS CLI: CloudWatch logs from the last 24 hours]
+    L --> E[3. Claude analyzes the logs, removes duplicates, finds unique errors]
+    E --> F[4. Claude tries to fix each error in the code]
+    F --> PR[5. Commit the fixes and open a pull request]
+    PR --> H[Human reviews and merges]
+```
+
+My sketch of the workflow (not from the lesson, untested):
+
+```yaml
+name: daily-debug
+on:
+  schedule:
+    - cron: "0 3 * * *"          # every day, low-traffic hours
+permissions:
+  contents: write                # push the fix branch
+  pull-requests: write           # open the PR
+  id-token: write                # AWS OIDC login
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - run: npm install -g @anthropic-ai/claude-code
+      - name: Get the last 24h of errors
+        run: |
+          aws logs filter-log-events \
+            --log-group-name /aws/amplify/my-app \
+            --start-time $(date -d '24 hours ago' +%s000) \
+            --filter-pattern ERROR \
+            --max-items 200 > errors.json
+      - name: Let Claude fix them
+        env:
+          CLAUDE_CODE_USE_BEDROCK: "1"
+          AWS_REGION: us-east-1
+        run: |
+          claude -p "Read errors.json. Remove duplicates, find the unique errors, fix each one in the code \
+          and write a summary (error, root cause, fix) in pr_body.md." \
+            --allowedTools "Read,Edit,Write"
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git checkout -b auto-fix/$(date +%F)
+          git add -A ':!errors.json' ':!pr_body.md'
+          git -c user.name=claude-bot -c user.email=bot@example.com commit -m "Automated fixes from production logs"
+          git push origin HEAD
+          gh pr create --title "Automated fixes $(date +%F)" --body-file pr_body.md
+```
+
+> Anthropic also has an official GitHub Action for this (`anthropics/claude-code-action`), which supports
+> Bedrock.
+
+### Real-world example
+
+In the chatbot, Claude found that production used an **invalid model ID**: a typo in the model identifier that
+only appeared in the production config. Claude found the correct ID format, updated the config file
+(`lib/ai/providers.ts`) and opened a PR with three sections: **Error**, **Root cause** and **Fix
+implemented**.
+
+> Note (not in the lesson): on Bedrock this error is common with newer models, which must be called through an
+> **inference profile** ID with a region prefix (e.g. `us.anthropic.claude-...` or `global.anthropic.claude-...`)
+> instead of the base model ID.
+
+### Benefits
+
+| Benefit | Why |
+|---|---|
+| Proactive monitoring | Catches errors before you even know they exist |
+| Time savings | No more digging through logs by hand |
+| Clear documentation | Every fix comes with an explanation |
+| Review process | The PR lets you check the fix before merging |
+| Continuous improvement | Runs every day and catches new problems |
+
+### Implementation considerations
+
+- **AWS permissions** to read CloudWatch (e.g. `logs:FilterLogEvents`), plus `bedrock:InvokeModel` if Claude
+  runs on Bedrock.
+- A **limit on the number of errors** processed, to stay within the context window.
+- **Deduplication** logic for similar errors.
+- **Write permissions** on the repo so the workflow can create pull requests.
+- Run it during **low-traffic hours**.
+
+Debugging goes from a reactive, manual process to a proactive, automated one with minimal intervention.
 
 ## 6. Computer Use
 
-<!-- pending -->
+**Computer Use** lets Claude interact directly with a **desktop environment**, controlling a computer the way a
+person would. Claude doesn't just describe what to do or generate code: it **does the task**.
+
+The lesson's roadmap:
+
+```mermaid
+flowchart LR
+    A[Computer Use demo] --> B[How Computer Use works] --> C[Setting up a reference implementation]
+```
+
+### What Computer Use can do
+
+| Action | Example |
+|---|---|
+| Take screenshots | See what's on the screen |
+| Click | Buttons and links |
+| Type | Text in forms and apps |
+| Navigate | Between apps and browser tabs |
+| Follow multi-step processes | Tasks that need visual feedback at every step |
+
+This makes it especially useful for **QA testing**, where you have to use a UI and check that everything works.
+
+### Real-world example: automated QA testing
+
+A React component with **autocomplete**: typing `@` lets the user mention files or resources (e.g.
+`@document.pdf` becomes a mention chip in the textarea). It looks fine at first sight, but you want to test the
+edge cases. Instead of testing by hand, you give Claude the test cases:
+
+| # | Test case | Result |
+|---|---|---|
+| 1 | Typing `Did you read @` shows the autocomplete options | ✅ Pass |
+| 2 | Pressing **Enter** adds the mention to the textarea | ✅ Pass |
+| 3 | Pressing **Backspace** after adding mentions shows the autocomplete list in the right position | ❌ Fail: the list appears at the top of the page |
+
+To press Enter, for example, Claude calls the computer tool with the action `key` and the text `Return`.
+Claude found a real bug that's easy to miss when testing by hand.
+
+### How the testing process works
+
+```mermaid
+flowchart TD
+    A[Open a browser and go to the app] --> B[Run a test case step by step]
+    B --> C[Take screenshots to check the visual behavior]
+    C --> D[Record pass or fail with details]
+    D --> E{More test cases?}
+    E -- yes --> F[Reload the page for a clean state] --> B
+    E -- no --> G[Summary report with actionable findings]
+```
+
+The key advantage: Claude catches problems you might miss, and can run **the same tests consistently** every
+time the code changes.
+
+### Setting up Computer Use
+
+Computer Use runs in an **isolated environment** for security:
+
+- A **Docker container** running a desktop environment.
+- A **browser** that Claude can control.
+- A **chat interface** where you give Claude instructions.
+- **Full isolation** from your main system.
+
+The isolation is key: Claude can use apps and websites with no risk to your personal data or your system.
+
+> Note (not in the lesson): Anthropic's reference implementation is the `computer-use-demo` in the
+> `anthropic-quickstarts` repo on GitHub. It runs in Docker and can use Claude on Bedrock
+> (`API_PROVIDER=bedrock` plus your AWS credentials).
+
+### Best practices
+
+- Be **specific** about what Claude should test or do.
+- Give **clear success criteria** for each task.
+- Break complex workflows into **smaller steps**.
+- Always run Computer Use in **isolated environments**.
+- **Review** Claude's findings and check the important results yourself.
+
+Computer Use moves Claude from *generating text about tasks* to *actually doing them*: QA testing, repetitive
+workflows, exploring complex apps, with consistent and documented results.
 
 ## 7. How Computer Use works
 
-<!-- pending -->
+Computer Use is **just tool use** (Module 4). The only difference is what the tool does: instead of calling a
+weather API or a database, Claude asks to **control a computer interface**.
+
+### Tool use recap
+
+```mermaid
+sequenceDiagram
+    participant S as Our server
+    participant C as Claude
+    S->>C: User message + tool schemas (get_weather_schema)
+    C-->>S: toolUse: get_weather with location San Francisco
+    S->>S: Run the tool function: Sunny
+    S->>C: toolResult: Sunny
+    C-->>S: Final answer
+```
+
+1. Send Claude the question plus the available tool schemas.
+2. Claude decides it needs a tool.
+3. Claude replies with a tool use request (tool name + inputs).
+4. Our server runs the function.
+5. We send the result back to Claude.
+
+### Same flow, different tool
+
+With Computer Use the pattern is identical, but the "tool" **simulates computer interactions**: mouse clicks,
+keyboard input, screenshots. Our server runs those actions in a **Docker container with Firefox**.
+
+```mermaid
+sequenceDiagram
+    participant S as Our server
+    participant C as Claude
+    participant D as Docker container with Firefox
+    S->>C: Task + computer tool schema
+    C-->>S: toolUse: computer, action screenshot
+    S->>D: Take a screenshot
+    D-->>S: Image
+    S->>C: toolResult with the image
+    C-->>S: toolUse: computer, action left_click at a coordinate
+    S->>D: Click
+    Note over S,C: Repeat until the task is done
+```
+
+The schema you send is **tiny**: just the tool type and the screen size. Behind the scenes it **expands** into a
+full specification that tells Claude everything it can do:
+
+| What you send (`computer_20250124`) | What it expands to (main properties) |
+|---|---|
+| Tool type, name, screen width and height | `action`: e.g. `screenshot`, `left_click`, `mouse_move`, `type`, `key`, `scroll` |
+| | `coordinate`: `[x, y]` on the screen |
+| | `text`: text to type or keys to press (e.g. `Return`) |
+| | `duration`: e.g. how long to hold a key or wait |
+
+In Bedrock Converse format (my sketch, not from the lesson; check the exact fields and beta flag in the Bedrock
+docs for your model):
+
+```python
+computer_tool = {
+    "type": "computer_20250124",
+    "name": "computer",
+    "display_width_px": 1024,
+    "display_height_px": 768,
+}
+
+response = client.converse(
+    modelId=model_id,
+    messages=messages,
+    additionalModelRequestFields={
+        "tools": [computer_tool],                    # Anthropic-defined tool, not a toolSpec
+        "anthropic_beta": ["computer-use-2025-01-24"],
+    },
+)
+```
+
+Each `toolUse` from Claude then has an `input` like `{"action": "left_click", "coordinate": [512, 300]}` or
+`{"action": "key", "text": "Return"}`. For `screenshot`, the `toolResult` carries the image:
+
+```python
+tool_result = {
+    "toolResult": {
+        "toolUseId": tool_use["toolUseId"],
+        "content": [{"image": {"format": "png", "source": {"bytes": screenshot_bytes}}}],
+    }
+}
+```
+
+### The technical implementation
+
+You need an environment that can **run Claude's actions programmatically**. The reference implementation uses a
+Docker container with Firefox, plus code that simulates key presses and mouse movements.
+
+The key idea: **Claude doesn't control the computer directly**. It only makes tool requests; **your
+infrastructure** turns them into real clicks and keystrokes.
+
+| Who | Does what |
+|---|---|
+| Claude | Looks at screenshots and decides the next action (tool request) |
+| Your server | Receives the request and runs it in the container |
+| Container | Real desktop and browser where the actions happen |
+
+### Getting started
+
+You don't have to build this from scratch: Anthropic's **reference implementation** handles the hard parts.
+
+Prerequisites:
+
+- A **Docker runtime** (e.g. OrbStack).
+- An **AWS profile** configured locally (usually `default`) — get the name from your credentials file.
+- The reference implementation from the **anthropic-quickstarts** repo.
+
+One `docker run` starts it. You get a **chat on the left** to talk to Claude and a **browser on the right**
+where Claude works. The demo warns you never to give it access to sensitive accounts or data.
+
+> Note (not in the lesson): the command, roughly as in the quickstart's README (check it there before running):
+>
+> ```bash
+> docker run \
+>   -e API_PROVIDER=bedrock \
+>   -e AWS_PROFILE=default \
+>   -e AWS_REGION=us-west-2 \
+>   -v $HOME/.aws:/home/computeruse/.aws \
+>   -v $HOME/.anthropic:/home/computeruse/.anthropic \
+>   -p 5900:5900 -p 8501:8501 -p 6080:6080 -p 8080:8080 \
+>   -it ghcr.io/anthropics/anthropic-quickstarts:computer-use-demo-latest
+> ```
+>
+> Then open `http://localhost:8080`.
 
 ## 8. Qualities of agents
 
