@@ -11,10 +11,13 @@
 - [2. Claude Code in action](#2-claude-code-in-action)
   - [The `/init` command and `CLAUDE.md`](#the-init-command-and-claudemd)
   - [Common workflows](#common-workflows)
-    - [Plan first](#plan-first)
-    - [Test-driven development (TDD)](#test-driven-development-tdd)
   - [Practical tips](#practical-tips)
 - [3. Adding MCP servers to Claude Code](#3-adding-mcp-servers-to-claude-code)
+  - [How the integration works](#how-the-integration-works)
+  - [Adding a server](#adding-a-server)
+  - [Testing the integration](#testing-the-integration)
+  - [Popular MCP servers for development](#popular-mcp-servers-for-development)
+  - [Building your own workflow](#building-your-own-workflow)
 - [4. Parallelizing Claude Code](#4-parallelizing-claude-code)
 - [5. Automated debugging](#5-automated-debugging)
 - [6. Computer Use](#6-computer-use)
@@ -205,7 +208,84 @@ Beyond writing code, Claude can handle routine development tasks:
 
 ## 3. Adding MCP servers to Claude Code
 
-<!-- pending -->
+Claude Code has a **built-in MCP client**, so you can plug MCP servers into it and give it new capabilities.
+Each server can expose **tools, prompts and resources** (the same three primitives from Module 7).
+
+### How the integration works
+
+```mermaid
+flowchart LR
+    CC[Claude Code with built-in MCP client] <--> S1[MCP server A] --> E1[External service A]
+    CC <--> S2[MCP server B] --> E2[External service B]
+```
+
+In the lesson's example, Claude Code connects to a **custom MCP server** with a document conversion tool,
+`document_path_to_markdown`, that turns PDF and Word files into Markdown.
+
+```mermaid
+flowchart LR
+    CC[Claude Code] <--> S[documents MCP server] --> T[document_path_to_markdown tool]
+```
+
+### Adding a server
+
+Stop any running Claude Code session, then run:
+
+```bash
+claude mcp add documents uv run main.py
+```
+
+| Argument | Meaning |
+|---|---|
+| `documents` | Server name: any name you want |
+| `uv run main.py` | Command that starts the MCP server |
+
+Restart Claude Code and it connects to the server automatically.
+
+> Note (not in the lesson): the docs recommend putting `--` before the server command, so that its options
+> aren't read as `claude` options: `claude mcp add documents -- uv run main.py`. Other useful commands:
+>
+> | Command | What it does |
+> |---|---|
+> | `claude mcp list` | List the configured servers |
+> | `claude mcp remove documents` | Remove a server |
+> | `/mcp` (inside Claude Code) | See the connection status and tools of each server |
+> | `--scope local / project / user` | Where the config is saved: just you in this project (default), the team via `.mcp.json` in the repo, or all your projects |
+
+### Testing the integration
+
+Once connected, you just ask in plain language, e.g. *"convert `mcp_docs.docx` to markdown"*. Claude picks the
+`document_path_to_markdown` tool from the MCP server by itself, and returns the document as Markdown (in the
+lesson, a table of the MCP primitives).
+
+This is the key point: an MCP server adds a **completely new capability** to Claude Code without changing
+Claude Code itself.
+
+### Popular MCP servers for development
+
+| Server | What it gives Claude |
+|---|---|
+| `sentry-mcp` | Find and fix errors logged in Sentry |
+| `playwright-mcp` | Browser automation for testing and troubleshooting |
+| `figma-context-mcp` | Access to Figma designs |
+| `mcp-atlassian` | Access to Confluence and Jira |
+| `firecrawl-mcp-server` | Web scraping |
+| `slack-mcp` | Post messages or reply to specific threads |
+
+### Building your own workflow
+
+The real power comes from **combining several servers** that match how you work:
+
+```mermaid
+flowchart LR
+    J[Jira: read the ticket requirements] --> CC[Claude Code]
+    S[Sentry: production error details] --> CC
+    X[Custom servers: your own tools] --> CC
+    CC --> SL[Slack: notify the team when done]
+```
+
+Think about the external services you use every day: there's probably an MCP server that connects them to
+Claude Code.
 
 ## 4. Parallelizing Claude Code
 
