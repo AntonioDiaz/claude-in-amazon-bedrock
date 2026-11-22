@@ -11,6 +11,8 @@
 - [2. Claude Code in action](#2-claude-code-in-action)
   - [The `/init` command and `CLAUDE.md`](#the-init-command-and-claudemd)
   - [Common workflows](#common-workflows)
+    - [Plan first](#plan-first)
+    - [Test-driven development (TDD)](#test-driven-development-tdd)
   - [Practical tips](#practical-tips)
 - [3. Adding MCP servers to Claude Code](#3-adding-mcp-servers-to-claude-code)
 - [4. Parallelizing Claude Code](#4-parallelizing-claude-code)
@@ -153,8 +155,9 @@ future conversation**, so Claude gets better as the file grows.
 
 ### Common workflows
 
-Claude works best as an **effort multiplier**: the more context and structure you give it, the better the
-result. Two workflows that work well:
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/9c635ee6-1210-4f93-b84b-3aa90caf9d2a" />
+
+Claude works best as an **effort multiplier**: the more context and structure you give it, the better the result. Two workflows that work well:
 
 #### Plan first
 
