@@ -11,6 +11,8 @@
 - [2. Claude Code in action](#2-claude-code-in-action)
   - [The `/init` command and `CLAUDE.md`](#the-init-command-and-claudemd)
   - [Common workflows](#common-workflows)
+    - [Plan first](#plan-first)
+    - [Test-driven development (TDD)](#test-driven-development-tdd)
   - [Practical tips](#practical-tips)
 - [3. Adding MCP servers to Claude Code](#3-adding-mcp-servers-to-claude-code)
   - [How the integration works](#how-the-integration-works)
@@ -45,6 +47,9 @@
   - [The technical implementation](#the-technical-implementation)
   - [Getting started](#getting-started)
 - [8. Qualities of agents](#8-qualities-of-agents)
+  - [How agents work in practice](#how-agents-work-in-practice)
+  - [Comparing the two agents](#comparing-the-two-agents)
+  - [Key qualities of effective agents](#key-qualities-of-effective-agents)
 - [Common pitfalls](#common-pitfalls)
 
 ---
@@ -773,7 +778,58 @@ where Claude works. The demo warns you never to give it access to sensitive acco
 
 ## 8. Qualities of agents
 
-<!-- pending -->
+After looking at Claude Code and Computer Use, some clear patterns show **what makes an agent work**: focused
+tool use, awareness of the environment, and iterative execution.
+
+### How agents work in practice
+
+Example: Claude Code is asked to **add a test** for `document_path_to_markdown`. It makes four tool calls:
+
+| # | Tool call | Type |
+|---|---|---|
+| 1 | Read an existing file | 👀 Observe |
+| 2 | Read another existing file | 👀 Observe |
+| 3 | Update the test file | ✏️ Act |
+| 4 | Run the tests (success criteria) | 👀 Observe |
+
+Three of the four calls only **gather information** from the environment; just one changes it. This
+**"observe first, then act"** pattern shows up in both agents.
+
+Computer Use does the same: every tool call (`screenshot`, `left_click`, `type`...) **returns a screenshot**,
+so Claude always sees the current state of the UI and adjusts its next action.
+
+```mermaid
+flowchart LR
+    O[Observe: read files or take a screenshot] --> A[Act: edit, click, type]
+    A --> F[Feedback: test results or new screenshot]
+    F --> O
+```
+
+### Comparing the two agents
+
+<img width="800" height="450" alt="image" src="https://github.com/user-attachments/assets/2d66e792-349f-4cff-8d09-bc7fe23985aa" />
+
+| | Claude Code | Computer Use |
+|---|---|---|
+| Uses tools in a loop until success or error? | Yes | Yes |
+| Where does the context come from? | Tool calls (reading files, running commands), not a long prompt or RAG | Tool calls (screenshots) |
+| Toolset | Small and well defined | Small and well defined |
+| Type of task | High value, complex | High value, complex |
+| Cost of an error | Low, but not negligible | Very low |
+
+### Key qualities of effective agents
+
+<img width="800" height="450" alt="image" src="https://github.com/user-attachments/assets/7ddfe457-a1bc-444f-a4f8-a8f196209474" />
+
+| Quality | What it means |
+|---|---|
+| **1. Focused toolset, run in a loop** | A few simple, well-defined tools, run again and again until the success criteria, an error or an **iteration limit**. The loop lets the agent correct its course |
+| **2. Context is everything** | Claude knows nothing about your environment. It needs tools to read the current state; the quality of that context drives the agent's performance |
+| **3. High-value tasks with low cost of error** | Complex, knowledge-heavy work where mistakes can be caught and fixed (e.g. writing code). Avoid agents for high-risk decisions with serious economic or safety impact |
+| **4. Continuous evaluation** | The only reliable way to build good agents: evaluation criteria and constant testing against real scenarios, **including your prompts and tool descriptions** (Module 2) |
+
+Claude Code and Computer Use work well because they're built around these principles. Keep them in mind when
+building your own agents.
 
 ## Common pitfalls
 
