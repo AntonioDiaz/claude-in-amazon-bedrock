@@ -19,6 +19,13 @@
   - [Popular MCP servers for development](#popular-mcp-servers-for-development)
   - [Building your own workflow](#building-your-own-workflow)
 - [4. Parallelizing Claude Code](#4-parallelizing-claude-code)
+  - [The challenge: file conflicts](#the-challenge-file-conflicts)
+  - [Git worktrees](#git-worktrees)
+  - [Automating worktree creation](#automating-worktree-creation)
+  - [Custom commands](#custom-commands)
+  - [Parallel development in action](#parallel-development-in-action)
+  - [Merging the changes](#merging-the-changes)
+  - [Results](#results)
 - [5. Automated debugging](#5-automated-debugging)
 - [6. Computer Use](#6-computer-use)
 - [7. How Computer Use works](#7-how-computer-use-works)
@@ -289,7 +296,130 @@ Claude Code.
 
 ## 4. Parallelizing Claude Code
 
-<!-- pending -->
+Running **several Claude Code instances in parallel** is one of the biggest productivity gains. Claude is
+lightweight, so you can start several copies, give each one a different task and let them work at the same
+time: in practice, a team of virtual software engineers on your project.
+
+### The challenge: file conflicts
+
+If all the instances work on the **same folder**, they can edit the same files at the same time. Each instance
+doesn't know what the others are doing, so the result can be conflicting or invalid code.
+
+```mermaid
+flowchart TD
+    A[Claude 1: add logging] --> P[Same project folder]
+    B[Claude 2: support pptx files] --> P
+    C[Claude 3: investigate failing test] --> P
+    P --> X[Conflicting edits]
+```
+
+The solution: give each instance its **own workspace**. Each one works on its own copy of the project, in
+isolation, and then its changes are merged back into the main project.
+
+### Git worktrees
+
+**Git worktrees** fit this perfectly. If the project already uses Git, you can use them right away. They extend
+Git branching: each worktree is a **full copy of the project in a separate folder**, linked to its **own
+branch**.
+
+| Folder | Branch | Content |
+|---|---|---|
+| `.trees/feature_a` | `feature_a` | Full copy of the codebase |
+| `.trees/feature_b` | `feature_b` | Full copy of the codebase |
+
+You run an independent Claude Code instance in each worktree. When an instance finishes, you commit its work
+and merge the branch into `main`, like any other Git branch.
+
+```mermaid
+gitGraph
+    commit
+    branch feature_a
+    branch feature_b
+    checkout feature_a
+    commit id: "feature A"
+    checkout feature_b
+    commit id: "feature B"
+    checkout main
+    merge feature_a
+    merge feature_b
+```
+
+> Note (not in the lesson): the Git commands behind it:
+>
+> ```bash
+> git worktree add .trees/feature_a -b feature_a   # new folder + new branch
+> git worktree list                                 # show all worktrees
+> git worktree remove .trees/feature_a              # delete it after merging
+> ```
+>
+> Add `.trees/` to `.gitignore` so the worktrees aren't committed into the main project.
+
+### Automating worktree creation
+
+You don't have to manage this by hand: you can ask Claude Code to do it. A prompt that asks Claude to:
+
+1. Create a new git worktree called `feature_a` in the `.trees` folder (and stop if it already exists).
+2. Create **symlinks** for the dependencies that Git doesn't track (e.g. `.venv`).
+3. Open a new VS Code window in that folder (`code .trees/feature_a`).
+
+### Custom commands
+
+Instead of pasting a long prompt every time, turn it into a **custom slash command**: a `.md` file in
+`.claude/commands/`. The file can use **`$ARGUMENTS`**, which is replaced by whatever you pass to the command.
+
+| Command | Result |
+|---|---|
+| `/project:create_worktree feature_a` | Creates a worktree called `feature_a` |
+| `/project:create_worktree develop` | Creates a worktree called `develop` |
+
+My version of `.claude/commands/create_worktree.md` (not the lesson's exact text):
+
+```markdown
+Create a git worktree called $ARGUMENTS in the .trees folder, on a new branch $ARGUMENTS.
+If .trees/$ARGUMENTS already exists, stop and tell me.
+Create a symlink of the .venv folder inside the new worktree.
+Open the worktree in a new VS Code window with: code .trees/$ARGUMENTS
+```
+
+> Note (not in the lesson): in current versions of Claude Code the `project:` prefix is gone; the command is
+> just `/create_worktree feature_a`. Project commands live in `.claude/commands/` (shared through Git) and
+> personal ones in `~/.claude/commands/`.
+
+### Parallel development in action
+
+With one worktree per feature, each VS Code window runs its own Claude Code on its own task:
+
+| Worktree | Task |
+|---|---|
+| 1 | Update the document tests |
+| 2 | Add logging |
+| 3 | Add note-taking tools |
+| 4 | Add a subtraction tool |
+
+### Merging the changes
+
+The merge can be automated too, with a second custom command (`.claude/commands/merge_worktree.md`) that asks
+Claude to:
+
+1. Go into the worktree folder `.trees/$ARGUMENTS`.
+2. Look at the latest commit to understand the changes.
+3. Go back to the root folder.
+4. Merge the worktree branch.
+5. Resolve any merge conflicts (using commands like `git status` to list them).
+
+Claude can resolve merge conflicts by itself, because it understands what changed in each branch.
+
+```mermaid
+flowchart LR
+    C[create_worktree] --> W[Claude works in the worktree] --> K[Commit] --> M[merge_worktree] --> MAIN[main branch]
+```
+
+### Results
+
+This scales to as many parallel instances as **you** can manage. Instead of building features one after
+another, several Claude instances build different parts of the project at the same time, each in its own
+isolated environment, and then their work is merged. Your development capacity is multiplied by the number
+of instances you run.
 
 ## 5. Automated debugging
 
