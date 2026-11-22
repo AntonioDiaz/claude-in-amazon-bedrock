@@ -8,14 +8,16 @@
   - [The agent loop](#the-agent-loop)
   - [The plan for this module](#the-plan-for-this-module)
   - [When to use an agent](#when-to-use-an-agent)
-- [2. Claude Code setup](#2-claude-code-setup)
-- [3. Claude Code in action](#3-claude-code-in-action)
-- [4. Enhancements with MCP servers](#4-enhancements-with-mcp-servers)
-- [5. Parallelizing Claude Code](#5-parallelizing-claude-code)
-- [6. Automated debugging](#6-automated-debugging)
-- [7. Computer Use](#7-computer-use)
-- [8. How Computer Use works](#8-how-computer-use-works)
-- [9. Qualities of agents](#9-qualities-of-agents)
+- [2. Claude Code in action](#2-claude-code-in-action)
+  - [The `/init` command and `CLAUDE.md`](#the-init-command-and-claudemd)
+  - [Common workflows](#common-workflows)
+  - [Practical tips](#practical-tips)
+- [3. Adding MCP servers to Claude Code](#3-adding-mcp-servers-to-claude-code)
+- [4. Parallelizing Claude Code](#4-parallelizing-claude-code)
+- [5. Automated debugging](#5-automated-debugging)
+- [6. Computer Use](#6-computer-use)
+- [7. How Computer Use works](#7-how-computer-use-works)
+- [8. Qualities of agents](#8-qualities-of-agents)
 - [Common pitfalls](#common-pitfalls)
 
 ---
@@ -112,35 +114,113 @@ flowchart LR
 - Claude can **check its own work** (tests, error messages, screenshots).
 - Mistakes are **cheap or reversible**, or a person reviews the sensitive actions.
 
-## 2. Claude Code setup
+## 2. Claude Code in action
+
+Claude Code is more than a code generator. It's meant to be a **coding partner for the whole project
+lifecycle**, from the initial setup to deployment and maintenance:
+
+```mermaid
+flowchart LR
+    A[Discover] --> B[Design] --> C[Build] --> D[Deploy] --> E[Support and scale]
+```
+
+> Note (not in the lesson): to run Claude Code with Claude on **Amazon Bedrock**, set
+> `CLAUDE_CODE_USE_BEDROCK=1` and `AWS_REGION`, and have your usual AWS credentials configured.
+
+### The `/init` command and `CLAUDE.md`
+
+`/init` is the first step in a new project. Claude Code scans the codebase (structure, dependencies, commands,
+coding patterns) and writes a summary to **`CLAUDE.md`**. Claude reads this file **automatically** at the start
+of every future conversation.
+
+You can pass extra instructions to `/init` to point Claude at the areas you care about.
+
+There are three scopes:
+
+| Scope | Committed to git? | Use | File (not in the lesson) |
+|---|---|---|---|
+| **Project** | Yes, shared with the team | Commands, conventions, architecture | `./CLAUDE.md` |
+| **Local** | No | Your personal notes for this project | `./CLAUDE.local.md` |
+| **User** | — | Instructions for all your projects | `~/.claude/CLAUDE.md` |
+
+The lesson mentions the `#` shortcut to add a quick note to `CLAUDE.md`.
+
+> Note (not in the lesson): in recent versions of Claude Code you can also edit the memory files with the
+> `/memory` command, or just ask Claude to add the note to `CLAUDE.md`.
+
+Anything you write in `CLAUDE.md` (coding standards, project notes, architecture decisions) affects **every
+future conversation**, so Claude gets better as the file grows.
+
+### Common workflows
+
+Claude works best as an **effort multiplier**: the more context and structure you give it, the better the
+result. Two workflows that work well:
+
+#### Plan first
+
+Good for complex features:
+
+```mermaid
+flowchart LR
+    A[1. Feed context: ask Claude to read the relevant files] --> B[2. Plan: describe the feature, no code yet] --> C[3. Implement the plan]
+```
+
+Example: for a document conversion tool, first ask Claude to look at the existing tools and helper functions,
+then ask for an implementation plan, and only then for the code.
+
+> Note (not in the lesson): Claude Code also has a **plan mode** (`Shift+Tab`) where Claude can read and
+> plan but not edit files.
+
+#### Test-driven development (TDD)
+
+More effort at the start, but much better results:
+
+| Step | What you ask Claude |
+|---|---|
+| 1. Context | Read the files related to the feature |
+| 2. Test cases | Think of test cases, **without writing code yet** |
+| 3. Tests | Implement only the tests that are relevant |
+| 4. Code | Write code that makes the tests pass; Claude iterates until they're green |
+
+The tests give Claude a clear way to **check its own work**, and they cover edge cases you might not have
+thought of.
+
+| | Plan first | TDD |
+|---|---|---|
+| Best for | Complex features | Code that must be robust |
+| Upfront effort | Low | Higher |
+| How Claude checks its work | Against the plan | Against the tests |
+
+### Practical tips
+
+Beyond writing code, Claude can handle routine development tasks:
+
+- Set up the project environment and install dependencies.
+- Stage and commit changes with descriptive commit messages.
+- Run the test suite and interpret the results.
+- `/clear` to reset the conversation context (for example, between unrelated tasks).
+
+## 3. Adding MCP servers to Claude Code
 
 <!-- pending -->
 
-## 3. Claude Code in action
+## 4. Parallelizing Claude Code
 
 <!-- pending -->
 
-## 4. Enhancements with MCP servers
+## 5. Automated debugging
 
 <!-- pending -->
 
-## 5. Parallelizing Claude Code
+## 6. Computer Use
 
 <!-- pending -->
 
-## 6. Automated debugging
+## 7. How Computer Use works
 
 <!-- pending -->
 
-## 7. Computer Use
-
-<!-- pending -->
-
-## 8. How Computer Use works
-
-<!-- pending -->
-
-## 9. Qualities of agents
+## 8. Qualities of agents
 
 <!-- pending -->
 
