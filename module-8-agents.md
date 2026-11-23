@@ -808,6 +808,7 @@ flowchart LR
 ### Comparing the two agents
 
 <img width="800" height="450" alt="image" src="https://github.com/user-attachments/assets/2d66e792-349f-4cff-8d09-bc7fe23985aa" />
+&nbsp;
 
 | | Claude Code | Computer Use |
 |---|---|---|
@@ -820,6 +821,7 @@ flowchart LR
 ### Key qualities of effective agents
 
 <img width="800" height="450" alt="image" src="https://github.com/user-attachments/assets/7ddfe457-a1bc-444f-a4f8-a8f196209474" />
+&nbsp;
 
 | Quality | What it means |
 |---|---|
